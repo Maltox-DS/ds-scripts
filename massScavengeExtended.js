@@ -706,7 +706,8 @@ var premiumBtnEnabled = false;
         var mn = Math.min.apply(null, ts), mx = Math.max.apply(null, ts);
         cells.each(function () {
             var t = +this.getAttribute('data-last');
-            if (t === mn) this.setAttribute('style', GREEN); else if (t === mx) this.setAttribute('style', RED);
+            var pad = this.tagName === 'TD' ? '' : ';padding:1px 6px;border-radius:3px;white-space:nowrap';
+            if (t === mn) this.setAttribute('style', GREEN + pad); else if (t === mx) this.setAttribute('style', RED + pad);
         });
     }
     function injectOvStyle() {
@@ -715,6 +716,15 @@ var premiumBtnEnabled = false;
         st.id = 'msOvStyle';
         st.textContent =
             '#msPreviewBox td.ms-last{white-space:nowrap}' +
+            '#msPreviewBox,#msNewUI{-webkit-text-size-adjust:100%;text-size-adjust:100%}' +
+            '#msPreviewBox .ms-vc{background:#fff5da;border:1px solid #dcc79a;border-radius:4px;padding:6px 8px;margin-bottom:6px}' +
+            '#msPreviewBox .ms-vc-h{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:5px}' +
+            '#msPreviewBox .ms-vc-h a b{max-width:none}' +
+            '#msPreviewBox .ms-badge{padding:1px 6px;border-radius:3px;white-space:nowrap;font-size:12px;background:#ecd9a8}' +
+            '#msPreviewBox .ms-vc-g{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}' +
+            '#msPreviewBox .ms-vc-g div{background:#fbf0d0;border:1px solid #eadbb3;border-radius:3px;text-align:center;padding:2px 0;font-size:12px;white-space:nowrap}' +
+            '#msPreviewBox .ms-vc-g .ms-st{width:15px;height:15px;line-height:15px;font-size:10px;margin-right:2px}' +
+            '#msPreviewBox .ms-vc-s{display:flex;justify-content:space-between;font-size:12px;gap:6px}' +
             '@media (max-width:760px){' +
             '#msPreviewBox table.ms-tab{font-size:11px}' +
             '#msPreviewBox table.ms-tab th,#msPreviewBox table.ms-tab td{padding:3px 4px}' +
@@ -731,8 +741,23 @@ var premiumBtnEnabled = false;
     function renderOverview(list) {
         injectOvStyle();
         var sm = isSmall(), free = 0, running = 0;
+        if (sm) { var cards = ''; }
         var rows = list.map(function (v, idx) {
             var lr = lastReturn(v);
+            if (sm) {
+                cards += '<div class="ms-vc"><div class="ms-vc-h">' + vLink(v, true) +
+                    '<span class="ms-badge ms-last" data-last="' + lr + '">' + (lr ? '⏎ ' + fmtDate(lr * 1000, true) : '–') + '</span></div><div class="ms-vc-g">' +
+                    [1, 2, 3, 4].map(function (k) {
+                        var o = v.options && v.options[k], st = '<span class="ms-st">' + k + '</span>';
+                        if (!o || o.is_locked) return '<div style="color:#8a7550">' + st + '🔒</div>';
+                        var sq = o.scavenging_squad;
+                        if (!sq) { free++; return '<div style="color:#2e7d32;font-weight:bold">' + st + 'frei</div>'; }
+                        running++;
+                        var rt = +(sq.return_time || 0);
+                        return '<div>' + st + (rt ? '<span class="ms-cd" data-rt="' + rt + '"></span>' : 'läuft') + '</div>';
+                    }).join('') + '</div></div>';
+                return '';
+            }
             var cells = [1, 2, 3, 4].map(function (k) {
                 var o = v.options && v.options[k];
                 if (!o || o.is_locked) return '<td class="r" style="color:#8a7550">🔒</td>';
@@ -746,14 +771,12 @@ var premiumBtnEnabled = false;
                 '<td class="r ms-last" data-last="' + lr + '">' + (lr ? fmtDate(lr * 1000, sm) : '–') + '</td>' + cells + '</tr>';
         }).join('');
         var html =
-            '<div class="ms-tiles"><div class="ms-tile"><small>Dörfer</small><b>' + list.length + '</b></div>' +
-            '<div class="ms-tile"><small>Laufend</small><b>' + running + '</b></div>' +
-            '<div class="ms-tile"><small>Frei</small><b style="color:#2e7d32">' + free + '</b></div></div>' +
+            (sm ? cards :
             '<table class="ms-tab"><tr><th>Dorf</th><th class="r">Letzte Rückkehr</th>' +
             [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span><span class="ms-sn"> ' + STAGE_NAMES[k] + '</span></th>'; }).join('') +
-            '</tr>' + rows + '</table>';
-        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 nicht freigeschaltet · <span style="' + GREEN + ';padding:0 4px">zuerst zurück</span> <span style="' + RED + ';padding:0 4px">zuletzt zurück</span></small>');
-        markFirstLast('#msPreviewBox td.ms-last');
+            '</tr>' + rows + '</table>');
+        box(html, 'Raubzug-Übersicht', '<small>' + (sm ? '⏎ = letzte Rückkehr · ' : 'Restzeit läuft live mit · ') + '🔒 nicht freigeschaltet · <span style="' + GREEN + ';padding:0 4px">zuerst</span> <span style="' + RED + ';padding:0 4px">zuletzt</span></small>');
+        markFirstLast('#msPreviewBox .ms-last');
         function tick() {
             var cds = document.querySelectorAll('#msPreviewBox .ms-cd');
             if (!cds.length) { clearInterval(ovTimer); ovTimer = null; return; }
@@ -831,6 +854,12 @@ var premiumBtnEnabled = false;
         var pct = function (x) { return Math.round(x * 100) + ' ' + '%'; };
         var ca = T.est ? ' (ca.)' : '';
         var rows = data.map(function (d, idx) {
+            if (sm) {
+                var uc2 = d.util >= 1 ? '#2e7d32' : d.util >= 0.5 ? '#9a6b00' : '#d32f2f';
+                return '<div class="ms-vc"' + (d.idle ? ' style="border:2px solid #e6a100"' : '') + '><div class="ms-vc-h"><span>' + (idx + 1) + '. ' + vLink(d.v, true) + (d.idle ? ' ⚠️' : '') + '</span>' +
+                    '<span class="ms-badge ms-last" data-last="' + d.lr + '">' + (d.lr ? '⏎ ' + fmtDate(d.lr * 1000, true) : '–') + '</span></div>' +
+                    '<div class="ms-vc-s"><span>Auslastung <b style="color:' + uc2 + '">' + pct(d.util) + '</b></span><span>Beute/h <b>' + (d.rate ? fmt(d.rate) : '–') + '</b></span><span>Zu Hause <b>' + fmt(d.home) + '</b></span></div></div>';
+            }
             var utilCol = d.util >= 1 ? '#2e7d32' : d.util >= 0.5 ? '#9a6b00' : '#d32f2f';
             return '<tr class="v' + (idx & 1) + '"' + (d.idle ? ' style="outline:2px solid #e6a100;outline-offset:-2px"' : '') + '>' +
                 '<td class="r">' + (idx + 1) + '</td>' +
@@ -862,15 +891,15 @@ var premiumBtnEnabled = false;
             (lastV ? tile('Letzte Rückkehr', '<span style="color:#d32f2f">' + fmtDate(lastV.t * 1000, sm) + '</span>', esc(vName(lastV.v, sm)), 'border-color:#d32f2f') : '') +
             tile('Beute je Stufe' + ca, '', [1, 2, 3, 4].map(function (k) { return '<span class="ms-u"><span class="ms-st">' + k + '</span> ' + fmt(stageTot[k]) + '</span>'; }).join('')) +
             '</div>' +
-            '<table class="ms-tab"><tr><th class="r">#</th><th>Dorf</th>' + (sm ? '' : '<th class="r">Züge</th>') +
+            (sm ? rows : '<table class="ms-tab"><tr><th class="r">#</th><th>Dorf</th>' + (sm ? '' : '<th class="r">Züge</th>') +
             '<th class="r">Auslastung</th><th class="r">Letzte Rückkehr</th>' + (sm ? '' : '<th class="r">Beute' + ca + '</th>') +
             '<th class="r">Beute/h</th>' + (sm ? '' : '<th class="r" title="Beute pro Stunde je Einheit unterwegs">pro Einheit/h</th><th class="r">Truppen zu Hause</th>') +
-            '</tr>' + rows + '</table>';
+            '</tr>' + rows + '</table>');
         box(html, 'Raubzug-Statistik',
             '<small>Sortiert nach Beute/h · ⚠️ = freie Stufe und Truppen zu Hause · ' +
             '<span style="' + GREEN + ';padding:0 4px">zuerst zurück</span> <span style="' + RED + ';padding:0 4px">zuletzt zurück</span>' +
             (T.est ? ' · Beute geschätzt aus Tragkapazität' : '') + '</small>');
-        markFirstLast('#msPreviewBox td.ms-last');
+        markFirstLast('#msPreviewBox .ms-last');
     }
 
     function addPreviewButton() {

@@ -1,16 +1,18 @@
 # ds-scripts
 
+## Mass Scavenge Extended by Maltox
+
 Erweiterung für das Massenraubzug-Skript von Shinko to Kuma (Die Stämme).
 Das Originalskript wird unverändert geladen, die Erweiterung hängt sich nur ein.
 
 ## Einbinden (Schnellleiste → Ziel-URL)
 
 ```
-javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavenge_AlleProfile.js');void 0;
+javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
 ```
 
 Nach einem Update kann es etwas dauern, bis jsDelivr die neue Version unter `@main` ausliefert.
-Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@f193513`).
+Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`).
 
 ## Funktionen
 
@@ -34,6 +36,10 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@f193513`)
   Das Launch-Fenster des Originals wird nicht mehr angezeigt; über „Vorschau“ in der Leiste
   lässt sich die letzte Berechnung wieder öffnen.
 - **Mindestens 10 Einheiten** – Züge mit weniger als 10 Einheiten werden entfernt.
+
+## Alte Datei
+
+`massScavenge_AlleProfile.js` ist der frühere Name und wird nicht mehr aktualisiert.
 
 ## Hinweis
 

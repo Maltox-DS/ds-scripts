@@ -425,8 +425,24 @@ var premiumBtnEnabled = false;
             '<div class="ms-body">' + html + '</div>' + (foot ? '<div class="ms-foot">' + foot + '</div>' : '');
         d.querySelector('.ms-close').onclick = function () { d.parentNode.removeChild(d); };
         document.body.appendChild(d);
+        if (boxPos && !isSmall()) { d.style.margin = '0'; d.style.right = 'auto'; d.style.left = boxPos.left + 'px'; d.style.top = boxPos.top + 'px'; }
         d.style.overflowY = 'auto'; fitHeight(d);
+        /* Fenster an der Titelleiste verschiebbar (Position bleibt für die nächsten Fenster erhalten) */
+        d.querySelector('.ms-head').style.cursor = 'move';
+        $(d.querySelector('.ms-head')).on('mousedown', function (e) {
+            if ($(e.target).closest('button').length || isSmall()) return;
+            var r = d.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+            d.style.margin = '0'; d.style.right = 'auto'; d.style.left = r.left + 'px'; d.style.top = r.top + 'px';
+            function mv(ev) {
+                var l = Math.min(Math.max(0, ev.clientX - dx), window.innerWidth - 60), t = Math.min(Math.max(0, ev.clientY - dy), window.innerHeight - 40);
+                d.style.left = l + 'px'; d.style.top = t + 'px'; boxPos = { left: l, top: t };
+            }
+            function up() { $(document).off('mousemove', mv).off('mouseup', up); fitHeight(d); }
+            $(document).on('mousemove', mv).on('mouseup', up);
+            e.preventDefault();
+        });
     }
+    var boxPos = null;
     function closeAll() {
         ['msPreviewBox', 'massScavengeFinal', 'massScavengeSophie', 'msNewUI'].forEach(function (id) {
             var e = document.getElementById(id); if (e) e.parentNode.removeChild(e);

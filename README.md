@@ -34,9 +34,11 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
   Rückkehr, geschätzte Beute, mit Stämme-Icons. Abschicken direkt aus der Vorschau,
   jede Gruppe per eigenem Klick. Nach dem letzten Senden schließen sich alle Fenster.
   Das Launch-Fenster des Originals wird nicht mehr angezeigt.
-- **Übersicht** – Button im Einstellungsfenster: zeigt pro Dorf und Stufe, ob frei, gesperrt oder
-  wie lange der laufende Raubzug noch dauert (Restzeit läuft live mit), dazu letzte Rückkehr pro Dorf
-  (früheste grün, späteste rot), erste/letzte Rückkehr mit Dorf und Beute unterwegs pro Dorf und gesamt.
+- **Übersicht** – pro Dorf und Stufe frei / gesperrt / Restzeit (live), dazu die letzte Rückkehr
+  pro Dorf (früheste grün, späteste rot). Funktioniert auch auf dem Handy.
+- **Statistik** – Effizienz auf einen Blick: Beute pro Stunde (mit 24-h-Hochrechnung), Beute unterwegs,
+  Auslastung der Stufen, Truppen unterwegs vs. zu Hause, Leerlauf-Warnung (freie Stufe + Truppen zu Hause),
+  nächste freie Stufe, erste/letzte Rückkehr, Beute je Stufe und eine Rangliste der Dörfer nach Beute/h.
 - **Mindestens 10 Einheiten** – Züge mit weniger als 10 Einheiten werden entfernt.
 
 ## Alte Datei

@@ -222,7 +222,8 @@ var premiumBtnEnabled = false;
         var actions = newUi ? '' :
             '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
-            '<button type="button" class="btn" id="msOverview" title="Laufende Raubzüge und Restzeiten aller Dörfer anzeigen">Übersicht</button> ';
+            '<button type="button" class="btn" id="msOverview" title="Laufende Raubzüge und Restzeiten aller Dörfer anzeigen">Übersicht</button> ' +
+            '<button type="button" class="btn" id="msStats" title="Rückkehrzeiten und Beute unterwegs">Statistik</button> ';
         box.prepend(
             '<div id="msProfileBar" style="' + (newUi ? '' : 'padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0') + '">' +
             '<b>Profil:</b> <select id="msProfileSel">' + opts + '</select> ' +
@@ -236,6 +237,7 @@ var premiumBtnEnabled = false;
 
         $('#msRunAll').off('click').on('click', runAll);
         $('#msOverview').off('click').on('click', showOverview);
+        $('#msStats').off('click').on('click', showStats);
         $('#msCalc').off('click').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
@@ -313,7 +315,8 @@ var premiumBtnEnabled = false;
     }
     function fmtDur(s) { var h = Math.floor(s / 3600), m = Math.round((s - h * 3600) / 60); return h + ':' + ('0' + m).slice(-2); }
     function optParams(opt) {
-        var td = typeof tempData !== 'undefined' ? tempData : null, o = (td && td[opt]) || (td && td[1]) || {};
+        var td = typeof tempData !== 'undefined' && tempData ? tempData : null,
+            o = (td && td[opt]) || (massParams[opt]) || (td && td[1]) || massParams[1] || {};
         return {
             lf: o.loot_factor || LOOT_FACTOR[opt],
             exp: o.duration_exponent != null ? o.duration_exponent : (typeof duration_exponent !== 'undefined' ? duration_exponent : null),
@@ -400,7 +403,7 @@ var premiumBtnEnabled = false;
             '@media (max-width:760px){' +
             '#msPreviewBox{top:0;width:100vw;max-width:100vw;border-radius:0;border-left:0;border-right:0}' +
             '#msPreviewBox .ms-body{overflow-x:auto;padding:8px}' +
-            '#msPreviewBox .ms-tile{min-width:0;flex:1 1 40%}' +
+            '#msPreviewBox .ms-tile{min-width:0;flex:1 1 28%}' +
             '#msPreviewBox .ms-foot{flex-wrap:wrap}' +
             '}';
         document.head.appendChild(st);
@@ -624,9 +627,9 @@ var premiumBtnEnabled = false;
         next();
     }
 
-    /* ================= Übersicht laufender Raubzüge =================
-       Lädt die Massen-Raubzug-Seiten (nacheinander, mind. 200 ms Abstand) und zeigt pro Dorf und Stufe
-       die Restzeit. Es wird nichts verändert oder gesendet. */
+    /* ================= Übersicht & Statistik =================
+       Beide laden die Massen-Raubzug-Seiten (nacheinander, mind. 200 ms Abstand) und zeigen nur an.
+       Es wird nichts verändert oder gesendet. */
     function extractVillages(html) {
         var i = html.indexOf('[{"village_id"');
         if (i < 0) return [];
@@ -645,100 +648,229 @@ var premiumBtnEnabled = false;
         while ((m = re.exec(html))) max = Math.max(max, +m[1]);
         return max + 1;
     }
-    var ovTimer = null;
-    function showOverview() {
-        box('Lade Raubzüge …', 'Raubzug-Übersicht');
+    /* Stufen-Parameter (Beutefaktor, Dauer-Formel) direkt aus der Seite lesen – vor dem ersten Berechnen fehlen sie sonst */
+    var massParams = {};
+    function extractParams(html) {
+        var re = /\{[^{}]*"duration_exponent"[^{}]*\}/g, m, i = 0;
+        while ((m = re.exec(html)) && i < 8) {
+            try {
+                var o = JSON.parse(m[0]), k = +(o.id || o.option_id || 0) || (++i);
+                if (o.id || o.option_id) i++;
+                if (k >= 1 && k <= 4) massParams[k] = o;
+            } catch (e) {}
+        }
+    }
+    function loadMassData(title, render) {
+        box('Lade Raubzüge …', title);
         var base = 'game.php?screen=place&mode=scavenge_mass', all = [], pages = 1, p = 0, last = 0;
         if (game_data.player && game_data.player.sitter > 0) base = 'game.php?t=' + game_data.player.id + '&screen=place&mode=scavenge_mass';
         (function next() {
-            if (p >= pages) return renderOverview(all);
+            if (p >= pages) {
+                if (onlyCurrent()) all = all.filter(function (v) { return String(v.village_id) === String(game_data.village && game_data.village.id); });
+                if (!all.length) return box('Keine Dörfer gefunden.', title);
+                return render(all);
+            }
             var wait = Math.max(0, last + 210 - Date.now());
             setTimeout(function () {
                 last = Date.now();
                 $.get(base + '&page=' + p).done(function (html) {
-                    if (p === 0) pages = Math.min(pageCount(html), 50);
+                    if (p === 0) { pages = Math.min(pageCount(html), 50); extractParams(html); }
                     all = all.concat(extractVillages(html));
                     p++; next();
-                }).fail(function () { box('<b>Übersicht konnte nicht geladen werden.</b>', 'Raubzug-Übersicht'); });
+                }).fail(function () { box('<b>Daten konnten nicht geladen werden.</b>', title); });
             }, wait);
         })();
     }
+    function isSmall() { return window.innerWidth <= 760; }
+    function fmtDate(ms, short) {
+        var d = new Date(ms), p2 = function (n) { return ('0' + n).slice(-2); };
+        return short ? p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '. ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+                     : p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+    }
+    function vName(v, short) {
+        var n = String(v.village_name || v.village_id);
+        return short ? n.replace(/\s*K\d+\s*$/, '') : n;
+    }
+    function vLink(v, short) {
+        return '<a href="' + game_data.link_base_pure + 'info_village&id=' + v.village_id + '" target="_blank"><b>' + esc(vName(v, short)) + '</b></a>';
+    }
+    function lastReturn(v) {
+        var t = 0;
+        [1, 2, 3, 4].forEach(function (k) { var o = v.options && v.options[k]; if (o && !o.is_locked && o.scavenging_squad) t = Math.max(t, +(o.scavenging_squad.return_time || 0)); });
+        return t;
+    }
+    var RED = 'background:#d32f2f;color:#fff;font-weight:bold', GREEN = 'background:#2e7d32;color:#fff;font-weight:bold';
+    function markFirstLast(sel) {
+        var cells = $(sel), ts = cells.map(function () { return +this.getAttribute('data-last'); }).get().filter(function (t) { return t > 0; });
+        if (ts.length < 2) return;
+        var mn = Math.min.apply(null, ts), mx = Math.max.apply(null, ts);
+        cells.each(function () {
+            var t = +this.getAttribute('data-last');
+            if (t === mn) this.setAttribute('style', GREEN); else if (t === mx) this.setAttribute('style', RED);
+        });
+    }
+    function injectOvStyle() {
+        if (document.getElementById('msOvStyle')) return;
+        var st = document.createElement('style');
+        st.id = 'msOvStyle';
+        st.textContent =
+            '#msPreviewBox td.ms-last{white-space:nowrap}' +
+            '@media (max-width:760px){' +
+            '#msPreviewBox table.ms-tab{font-size:11px}' +
+            '#msPreviewBox table.ms-tab th,#msPreviewBox table.ms-tab td{padding:3px 4px}' +
+            '#msPreviewBox .ms-sn{display:none}' +
+            '#msPreviewBox .ms-tile{padding:4px 8px}#msPreviewBox .ms-tile b{font-size:13px}' +
+            '#msPreviewBox td a b{display:inline-block;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}' +
+            '}';
+        document.head.appendChild(st);
+    }
+
+    /* ---------- Übersicht: schlicht ---------- */
+    var ovTimer = null;
+    function showOverview() { loadMassData('Raubzug-Übersicht', renderOverview); }
     function renderOverview(list) {
-        if (onlyCurrent()) list = list.filter(function (v) { return String(v.village_id) === String(game_data.village && game_data.village.id); });
-        if (!list.length) return box('Keine Dörfer gefunden.', 'Raubzug-Übersicht');
-        var stamp = nowMs(), free = 0, running = 0;
-        function fmtDate(ms) {
-            var d = new Date(ms);
-            return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear() + ' ' +
-                   ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
-        }
-        /* Beute eines laufenden Zugs: bevorzugt die Angabe des Spiels (loot_res), sonst Schätzung */
-        var lootTot = { wood: 0, stone: 0, iron: 0 }, lootEst = false;
-        function squadLoot(sq, k, cf) {
-            var lr = sq.loot_res || sq.loot;
-            if (lr && typeof lr === 'object') return { wood: +lr.wood || 0, stone: +lr.stone || 0, iron: +lr.iron || 0, est: false };
-            var cap = +sq.carry_max && +sq.carry_max < 1e9 ? +sq.carry_max : 0;
-            if (!cap && sq.unit_counts) Object.keys(sq.unit_counts).forEach(function (u) { cap += (+sq.unit_counts[u] || 0) * (CARRY[u] || 0); });
-            if (!cap) return null;
-            var t = cap * (cf || 1) * optParams(k).lf / 3;
-            return { wood: t, stone: t, iron: t, est: true };
-        }
-        var lastList = [], firstV = null, lastV = null;
+        injectOvStyle();
+        var sm = isSmall(), free = 0, running = 0;
         var rows = list.map(function (v, idx) {
-            var lastRt = 0;
-            [1, 2, 3, 4].forEach(function (k) { var o = v.options && v.options[k]; if (o && !o.is_locked && o.scavenging_squad) lastRt = Math.max(lastRt, +(o.scavenging_squad.return_time || 0)); });
-            if (lastRt) {
-                lastList.push(lastRt);
-                if (!firstV || lastRt < firstV.t) firstV = { t: lastRt, v: v };
-                if (!lastV || lastRt > lastV.t) lastV = { t: lastRt, v: v };
-            }
-            var vLoot = 0;
-            var lastCell = '<td class="r ms-last" data-last="' + lastRt + '">' + (lastRt ? fmtDate(lastRt * 1000) : '–') + '</td>';
+            var lr = lastReturn(v);
             var cells = [1, 2, 3, 4].map(function (k) {
                 var o = v.options && v.options[k];
                 if (!o || o.is_locked) return '<td class="r" style="color:#8a7550">🔒</td>';
                 var sq = o.scavenging_squad;
-                if (!sq) { free++; return '<td class="r" style="color:#2f6614;font-weight:bold">frei</td>'; }
+                if (!sq) { free++; return '<td class="r" style="color:#2e7d32;font-weight:bold">frei</td>'; }
                 running++;
-                var lt = squadLoot(sq, k, v.unit_carry_factor);
-                if (lt) { lootTot.wood += lt.wood; lootTot.stone += lt.stone; lootTot.iron += lt.iron; vLoot += lt.wood + lt.stone + lt.iron; if (lt.est) lootEst = true; }
                 var rt = +(sq.return_time || 0);
-                return rt ? '<td class="r ms-cd" data-rt="' + rt + '" title="zurück ' + fmtTime(rt * 1000) + '"></td>' : '<td class="r">läuft</td>';
+                return rt ? '<td class="r ms-cd" data-rt="' + rt + '" title="zurück ' + fmtDate(rt * 1000) + '"></td>' : '<td class="r">läuft</td>';
             }).join('');
-            return '<tr class="v' + (idx & 1) + '"><td><a href="' + game_data.link_base_pure + 'info_village&id=' + v.village_id + '" target="_blank"><b>' + esc(v.village_name || v.village_id) + '</b></a></td>' + lastCell + cells +
-                '<td class="r">' + (vLoot ? fmt(vLoot) : '–') + '</td></tr>';
+            return '<tr class="v' + (idx & 1) + '"><td>' + vLink(v, sm) + '</td>' +
+                '<td class="r ms-last" data-last="' + lr + '">' + (lr ? fmtDate(lr * 1000, sm) : '–') + '</td>' + cells + '</tr>';
         }).join('');
         var html =
             '<div class="ms-tiles"><div class="ms-tile"><small>Dörfer</small><b>' + list.length + '</b></div>' +
-            '<div class="ms-tile"><small>Laufende Raubzüge</small><b>' + running + '</b></div>' +
-            '<div class="ms-tile"><small>Freie Stufen</small><b style="color:#2f6614">' + free + '</b></div>' +
-            (firstV ? '<div class="ms-tile" style="border-color:#6f8f3a;background:#e8f0d0"><small>Erste Rückkehr</small><b style="color:#2f6614">' + fmtDate(firstV.t * 1000) + '</b><br>' + esc(firstV.v.village_name || firstV.v.village_id) + '</div>' : '') +
-            (lastV && lastV !== firstV ? '<div class="ms-tile" style="border-color:#b3261a;background:#f6e0db"><small>Letzte Rückkehr</small><b style="color:#b3261a">' + fmtDate(lastV.t * 1000) + '</b><br>' + esc(lastV.v.village_name || lastV.v.village_id) + '</div>' : '') +
-            '<div class="ms-tile"><small>Beute unterwegs' + (lootEst ? ' (ca.)' : '') + '</small><b>' + fmt(lootTot.wood + lootTot.stone + lootTot.iron) + '</b><br>' +
-            img('holz.png', 'Holz') + ' ' + fmt(lootTot.wood) + ' &nbsp;' + img('lehm.png', 'Lehm') + ' ' + fmt(lootTot.stone) + ' &nbsp;' + img('eisen.png', 'Eisen') + ' ' + fmt(lootTot.iron) + '</div></div>' +
-            '<table class="ms-tab"><tr><th>Dorf</th><th class="r">Letzte Rückkehr</th>' + [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</th>'; }).join('') + '<th class="r">Beute' + (lootEst ? ' (ca.)' : '') + '</th></tr>' + rows + '</table>';
-        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 = nicht freigeschaltet · <span style="color:#2f6614;font-weight:bold">grün</span> = kommt zuerst zurück, <span style="color:#b3261a;font-weight:bold">rot</span> = zuletzt</small>');
-        if (lastList.length > 1) {
-            var mn = Math.min.apply(null, lastList), mx = Math.max.apply(null, lastList);
-            $('#msPreviewBox .ms-last').each(function () {
-                var t = +this.getAttribute('data-last');
-                if (t === mn) $(this).css({ color: '#2f6614', 'font-weight': 'bold', background: '#e3f0cf' });
-                else if (t === mx) $(this).css({ color: '#b3261a', 'font-weight': 'bold', background: '#f6d9d4' });
-            });
-        }
+            '<div class="ms-tile"><small>Laufend</small><b>' + running + '</b></div>' +
+            '<div class="ms-tile"><small>Frei</small><b style="color:#2e7d32">' + free + '</b></div></div>' +
+            '<table class="ms-tab"><tr><th>Dorf</th><th class="r">Letzte Rückkehr</th>' +
+            [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span><span class="ms-sn"> ' + STAGE_NAMES[k] + '</span></th>'; }).join('') +
+            '</tr>' + rows + '</table>';
+        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 nicht freigeschaltet · <span style="' + GREEN + ';padding:0 4px">zuerst zurück</span> <span style="' + RED + ';padding:0 4px">zuletzt zurück</span></small>');
+        markFirstLast('#msPreviewBox td.ms-last');
         function tick() {
             var cds = document.querySelectorAll('#msPreviewBox .ms-cd');
             if (!cds.length) { clearInterval(ovTimer); ovTimer = null; return; }
             var now = nowMs() / 1000;
             for (var i = 0; i < cds.length; i++) {
                 var left = +cds[i].getAttribute('data-rt') - now;
-                if (left <= 0) { cds[i].textContent = 'zurück'; cds[i].style.color = '#2f6614'; cds[i].style.fontWeight = 'bold'; }
+                if (left <= 0) { cds[i].textContent = 'zurück'; cds[i].style.color = '#2e7d32'; cds[i].style.fontWeight = 'bold'; }
                 else { var h = Math.floor(left / 3600), m = Math.floor((left - h * 3600) / 60), sec = Math.floor(left - h * 3600 - m * 60);
                        cds[i].textContent = h + ':' + ('0' + m).slice(-2) + ':' + ('0' + sec).slice(-2); }
             }
         }
         if (ovTimer) clearInterval(ovTimer);
         tick(); ovTimer = setInterval(tick, 1000);
+    }
+
+    /* ---------- Statistik: Rückkehr & Beute ---------- */
+    function showStats() { loadMassData('Raubzug-Statistik', renderStats); }
+    function squadLoot(sq, k, cf) {
+        var lr = sq.loot_res || sq.loot;
+        if (lr && typeof lr === 'object') return { wood: +lr.wood || 0, stone: +lr.stone || 0, iron: +lr.iron || 0, est: false };
+        var cap = +sq.carry_max && +sq.carry_max < 1e9 ? +sq.carry_max : 0;
+        if (!cap && sq.unit_counts) Object.keys(sq.unit_counts).forEach(function (u) { cap += (+sq.unit_counts[u] || 0) * (CARRY[u] || 0); });
+        if (!cap) return null;
+        var t = cap * (cf || 1) * optParams(k).lf / 3;
+        return { wood: t, stone: t, iron: t, est: true };
+    }
+    function squadDur(L, k, sq) {
+        var st = sq && +(sq.created_at || sq.start_time || 0), rt = sq && +(sq.return_time || 0);
+        if (st && rt > st) return rt - st;
+        var pr = optParams(k);
+        if (pr.exp == null || pr.fac == null || !L) return 0;
+        return (Math.pow(Math.pow(L, 2) * 100, pr.exp) + (pr.init || 0)) * pr.fac;
+    }
+    function unitSum(obj) { var n = 0; Object.keys(obj || {}).forEach(function (u) { if (u !== 'militia') n += +obj[u] || 0; }); return n; }
+    function renderStats(list) {
+        injectOvStyle();
+        var sm = isSmall(), now = nowMs() / 1000;
+        var T = { wood: 0, stone: 0, iron: 0, rate: 0, running: 0, unlocked: 0, out: 0, home: 0, outKnown: true, est: false },
+            stageTot = [0, 0, 0, 0, 0], first = null, lastV = null, next = null, idle = [];
+        var data = list.map(function (v) {
+            var d = { v: v, lr: lastReturn(v), n: 0, unl: 0, wood: 0, stone: 0, iron: 0, rate: 0, out: 0, home: unitSum(v.unit_counts_home), free: 0 };
+            [1, 2, 3, 4].forEach(function (k) {
+                var o = v.options && v.options[k];
+                if (!o || o.is_locked) return;
+                d.unl++;
+                var sq = o.scavenging_squad;
+                if (!sq) { d.free++; return; }
+                d.n++;
+                var rt = +(sq.return_time || 0);
+                if (rt && (!next || rt < next.t)) next = { t: rt, v: v, k: k };
+                var uc = sq.unit_counts || (sq.candidate_squad && sq.candidate_squad.unit_counts);
+                if (uc) d.out += unitSum(uc); else T.outKnown = false;
+                var l = squadLoot(sq, k, v.unit_carry_factor);
+                if (!l) return;
+                if (l.est) T.est = true;
+                var L = l.wood + l.stone + l.iron, dur = squadDur(L, k, sq);
+                d.wood += l.wood; d.stone += l.stone; d.iron += l.iron;
+                if (dur > 0) d.rate += L / dur * 3600;
+                stageTot[k] += L;
+            });
+            d.sum = d.wood + d.stone + d.iron;
+            d.util = d.unl ? d.n / d.unl : 0;
+            d.perUnit = d.out ? d.rate / d.out : 0;
+            d.idle = d.free > 0 && d.home >= MIN_UNITS;
+            if (d.idle) idle.push(d);
+            T.wood += d.wood; T.stone += d.stone; T.iron += d.iron; T.rate += d.rate;
+            T.running += d.n; T.unlocked += d.unl; T.out += d.out; T.home += d.home;
+            if (d.lr) {
+                if (!first || d.lr < first.t) first = { t: d.lr, v: v };
+                if (!lastV || d.lr > lastV.t) lastV = { t: d.lr, v: v };
+            }
+            return d;
+        });
+        data.sort(function (a, b) { return b.rate - a.rate; }); /* Rangliste nach Beute pro Stunde */
+        var pct = function (x) { return Math.round(x * 100) + ' ' + '%'; };
+        var ca = T.est ? ' (ca.)' : '';
+        var rows = data.map(function (d, idx) {
+            var utilCol = d.util >= 1 ? '#2e7d32' : d.util >= 0.5 ? '#9a6b00' : '#d32f2f';
+            return '<tr class="v' + (idx & 1) + '"' + (d.idle ? ' style="outline:2px solid #e6a100;outline-offset:-2px"' : '') + '>' +
+                '<td class="r">' + (idx + 1) + '</td>' +
+                '<td>' + vLink(d.v, sm) + (d.idle ? ' <span title="Freie Stufe und Truppen zu Hause">⚠️</span>' : '') + '</td>' +
+                (sm ? '' : '<td class="r">' + d.n + '/' + d.unl + '</td>') +
+                '<td class="r" style="color:' + utilCol + ';font-weight:bold">' + pct(d.util) + '</td>' +
+                '<td class="r ms-last" data-last="' + d.lr + '">' + (d.lr ? fmtDate(d.lr * 1000, sm) : '–') + '</td>' +
+                (sm ? '' : '<td class="r">' + fmt(d.sum) + '</td>') +
+                '<td class="r"><b>' + (d.rate ? fmt(d.rate) : '–') + '</b></td>' +
+                (sm ? '' : '<td class="r">' + (d.perUnit ? d.perUnit.toFixed(1).replace('.', ',') : '–') + '</td>' +
+                           '<td class="r">' + fmt(d.home) + '</td>') +
+                '</tr>';
+        }).join('');
+        var totAll = T.wood + T.stone + T.iron;
+        var outPct = T.outKnown && (T.out + T.home) ? pct(T.out / (T.out + T.home)) : '–';
+        var tile = function (label, val, sub, style) {
+            return '<div class="ms-tile"' + (style ? ' style="' + style + '"' : '') + '><small>' + label + '</small><b>' + val + '</b>' + (sub ? '<br>' + sub : '') + '</div>';
+        };
+        var html =
+            '<div class="ms-tiles">' +
+            tile('Beute pro Stunde' + ca, fmt(T.rate), 'Hochrechnung 24 h: ' + fmt(T.rate * 24)) +
+            tile('Beute unterwegs' + ca, fmt(totAll), img('holz.png', 'Holz') + ' ' + fmt(T.wood) + ' ' + img('lehm.png', 'Lehm') + ' ' + fmt(T.stone) + ' ' + img('eisen.png', 'Eisen') + ' ' + fmt(T.iron)) +
+            tile('Auslastung Stufen', T.unlocked ? pct(T.running / T.unlocked) : '–', T.running + ' von ' + T.unlocked + ' belegt') +
+            tile('Truppen unterwegs', outPct, T.outKnown ? fmt(T.out) + ' unterwegs · ' + fmt(T.home) + ' zu Hause' : fmt(T.home) + ' zu Hause') +
+            tile('Leerlauf', idle.length ? idle.length + (idle.length === 1 ? ' Dorf' : ' Dörfer') : 'keiner', idle.length ? 'freie Stufe + Truppen zu Hause' : 'alles ausgelastet',
+                 idle.length ? 'border-color:#e6a100;background:#fff3cd' : 'border-color:#2e7d32') +
+            (next ? tile('Nächste freie Stufe', fmtDate(next.t * 1000, true), esc(vName(next.v, true)) + ' · Stufe ' + next.k) : '') +
+            (first ? tile('Erste Rückkehr', '<span style="color:#2e7d32">' + fmtDate(first.t * 1000, sm) + '</span>', esc(vName(first.v, sm)), 'border-color:#2e7d32') : '') +
+            (lastV ? tile('Letzte Rückkehr', '<span style="color:#d32f2f">' + fmtDate(lastV.t * 1000, sm) + '</span>', esc(vName(lastV.v, sm)), 'border-color:#d32f2f') : '') +
+            tile('Beute je Stufe' + ca, '', [1, 2, 3, 4].map(function (k) { return '<span class="ms-u"><span class="ms-st">' + k + '</span> ' + fmt(stageTot[k]) + '</span>'; }).join('')) +
+            '</div>' +
+            '<table class="ms-tab"><tr><th class="r">#</th><th>Dorf</th>' + (sm ? '' : '<th class="r">Züge</th>') +
+            '<th class="r">Auslastung</th><th class="r">Letzte Rückkehr</th>' + (sm ? '' : '<th class="r">Beute' + ca + '</th>') +
+            '<th class="r">Beute/h</th>' + (sm ? '' : '<th class="r" title="Beute pro Stunde je Einheit unterwegs">pro Einheit/h</th><th class="r">Truppen zu Hause</th>') +
+            '</tr>' + rows + '</table>';
+        box(html, 'Raubzug-Statistik',
+            '<small>Sortiert nach Beute/h · ⚠️ = freie Stufe und Truppen zu Hause · ' +
+            '<span style="' + GREEN + ';padding:0 4px">zuerst zurück</span> <span style="' + RED + ';padding:0 4px">zuletzt zurück</span>' +
+            (T.est ? ' · Beute geschätzt aus Tragkapazität' : '') + '</small>');
+        markFirstLast('#msPreviewBox td.ms-last');
     }
 
     function addPreviewButton() {
@@ -875,6 +1007,7 @@ var premiumBtnEnabled = false;
             '<div class="ms-f"><button type="button" class="btn btn-confirm-yes" id="msCalc">▶ Berechnen</button>' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile berechnen</button>' +
             '<button type="button" class="btn" id="msOverview" title="Laufende Raubzüge und Restzeiten aller Dörfer anzeigen">Übersicht</button>' +
+            '<button type="button" class="btn" id="msStats" title="Rückkehrzeiten und Beute unterwegs">Statistik</button>' +
             '<span class="sp"></span><span class="ms-hint">Basis: Mass scavenging · Shinko to Kuma</span></div>';
         var ui = $('<div id="msNewUI"></div>').html(html).appendTo('body');
         fitHeight(ui[0]);

@@ -11,6 +11,12 @@ var premiumBtnEnabled = false;
     var runInfo = {};
     function onlyCurrent() { return lsGet('msOnlyCurrent') === '1'; }
     /* Rückkehrzeit (Unix-Sekunden) des spätesten laufenden Raubzugs im Dorf, sonst null */
+    function freeStages(data) {
+        var o = data && data.options, n = 0;
+        if (!o) return null;
+        Object.keys(o).forEach(function (k) { if (o[k] && !o[k].is_locked && !o[k].scavenging_squad) n++; });
+        return n;
+    }
     function runningUntil(data) {
         var o = data && data.options, until = null;
         if (!o) return null;
@@ -126,7 +132,7 @@ var premiumBtnEnabled = false;
             if (onlyCurrent() && data && String(data.village_id) !== String(game_data.village && game_data.village.id)) return;
             /* Laufender Raubzug im Dorf: neue Züge dürfen nicht länger laufen als der späteste laufende */
             var run = runningUntil(data);
-            if (run === null) return origCalc.call(this, data);
+            if (run === null || freeStages(data) === 0) return origCalc.call(this, data); /* kein Lauf oder keine freie Stufe: nichts zu kürzen */
             var remain = run - nowMs() / 1000, vid = data.village_id;
             var minDur = ((typeof duration_initial_seconds !== 'undefined' ? duration_initial_seconds : 0) + 60) *
                          (typeof duration_factor !== 'undefined' && duration_factor ? duration_factor : 1);

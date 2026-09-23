@@ -56,7 +56,9 @@ var premiumBtnEnabled = false;
         p.list[p.active].settings = snapshot();
         saveProfiles(p);
     }
-    function activeGroup() { if (batching) return batchGroup; var p = loadProfiles(); return p.list[p.active].group || '0'; }
+    /* '0'/leer = Standardgruppe -> die spielinterne Gruppe "alle" */
+    function resolveGroup(g) { return (!g || g === '0') ? (lsGet('msDefaultGroup') || '0') : String(g); }
+    function activeGroup() { if (batching) return batchGroup; var p = loadProfiles(); return resolveGroup(p.list[p.active].group); }
 
     /* ---------- Dorfgruppe: an alle Massen-Raubzug-Abfragen anhängen ---------- */
     if (!window.__msGroupHook) {
@@ -75,10 +77,15 @@ var premiumBtnEnabled = false;
             .done(function (d) {
                 try {
                     if (typeof d === 'string') d = JSON.parse(d);
-                    groupCache = [{ id: '0', name: 'Alle' }];
+                    groupCache = [];
+                    var def = null;
                     (d.result || []).forEach(function (g) {
-                        if (g.group_id != null && g.type !== 'separator') groupCache.push({ id: String(g.group_id), name: g.name });
+                        if (g.group_id == null || g.type === 'separator') return;
+                        groupCache.push({ id: String(g.group_id), name: g.name });
+                        if (!def && (g.type === 'all' || String(g.name).trim().toLowerCase() === 'alle')) def = String(g.group_id);
                     });
+                    if (!groupCache.length) groupCache = null;
+                    else lsSet('msDefaultGroup', def || groupCache[0].id);
                 } catch (e) { groupCache = null; }
                 cb(groupCache);
             })
@@ -142,21 +149,42 @@ var premiumBtnEnabled = false;
     }
 
     /* ---------- Oberfläche ---------- */
+    var MAX_TIP = 'Maximal pro Dorf losschicken (leer/0 = kein Limit)';
+    function bindMax(inp, unit) {
+        $(inp).on('input change', function () {
+            var m = loadMax(), v = parseInt($(this).val(), 10);
+            if (v > 0) m[unit] = v; else delete m[unit];
+            lsSet(MAX_KEY, JSON.stringify(m));
+            storeActive();
+        });
+    }
+    /* Max-Zeilen als Kopie der Backup-Zeilen einfügen, damit sie genauso aussehen */
     function addMaxInputs() {
         var max = loadMax();
         $('input[id$="Backup"]').each(function () {
             var unit = this.id.replace(/Backup$/, '');
             if (document.getElementById(unit + 'Max')) return;
-            $(this).after(
-                '<br><span title="Maximal pro Dorf losschicken (leer/0 = kein Limit)" style="color:#fff;font-weight:bold">Max</span><br>' +
-                '<input type="text" id="' + unit + 'Max" size="5" placeholder="∞" value="' + (max[unit] || '') + '">'
-            );
-            $('#' + unit + 'Max').on('input change', function () {
-                var m = loadMax(), v = parseInt($(this).val(), 10);
-                if (v > 0) m[unit] = v; else delete m[unit];
-                lsSet(MAX_KEY, JSON.stringify(m));
-                storeActive();
-            });
+            var inRow = $(this).closest('tr'), lblRow = inRow.prev('tr');
+            if (inRow.length && lblRow.length && /Backup/.test(lblRow.text()) && !inRow.attr('data-ms-max')) {
+                inRow.attr('data-ms-max', '1');
+                var newLbl = lblRow.clone(), newIn = inRow.clone();
+                newLbl.find('*').addBack().contents().each(function () {
+                    if (this.nodeType === 3 && /Backup/.test(this.nodeValue)) this.nodeValue = this.nodeValue.replace('Backup', 'Max');
+                });
+                newLbl.attr('title', MAX_TIP);
+                newIn.removeAttr('data-ms-max').find('input').each(function () {
+                    var u = this.id.replace(/Backup$/, '');
+                    ['onchange', 'oninput', 'onkeyup', 'name'].forEach(function (at) { this.removeAttribute(at); }, this);
+                    this.id = u + 'Max'; this.value = max[u] || ''; this.placeholder = '∞'; this.title = MAX_TIP;
+                });
+                inRow.after(newIn).after(newLbl);
+                newIn.find('input').each(function () { bindMax(this, this.id.replace(/Max$/, '')); });
+                return;
+            }
+            /* Fallback: einfach unter das Backup-Feld setzen */
+            $(this).after('<br><span title="' + MAX_TIP + '" style="color:#fff;font-weight:bold">Max</span><br>' +
+                '<input type="text" id="' + unit + 'Max" size="5" placeholder="∞" value="' + (max[unit] || '') + '">');
+            bindMax(document.getElementById(unit + 'Max'), unit);
         });
     }
 
@@ -173,6 +201,7 @@ var premiumBtnEnabled = false;
             '<button type="button" class="btn" id="msProfileNew">Neu</button> ' +
             '<button type="button" class="btn" id="msProfileRen">Umbenennen</button> ' +
             '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' +
+            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Vorschau</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
             '<br><b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
             ' &nbsp; <label title="Nur das Dorf berechnen, in dem du gerade bist"><input type="checkbox" id="msOnlyCur"' + (onlyCurrent() ? ' checked' : '') + '> nur aktuelles Dorf</label>' +
@@ -180,6 +209,10 @@ var premiumBtnEnabled = false;
         );
 
         $('#msRunAll').on('click', runAll);
+        $('#msReopen').on('click', function () {
+            if (!lastPreview) return box('Noch nichts berechnet – erst <b>Calculate runtimes</b> klicken.');
+            buildPreview.apply(null, lastPreview);
+        });
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
         $('#msProfileNew').on('click', function () {
@@ -210,6 +243,7 @@ var premiumBtnEnabled = false;
 
         loadGroups(function (groups) {
             var cur = activeGroup(), html;
+            if (groups && !groups.some(function (g) { return g.id === cur; })) cur = lsGet('msDefaultGroup');
             if (groups) {
                 html = '<select id="msGroupSel">' + groups.map(function (g) {
                     return '<option value="' + esc(g.id) + '"' + (g.id === cur ? ' selected' : '') + '>' + esc(g.name) + '</option>';
@@ -277,21 +311,25 @@ var premiumBtnEnabled = false;
         };
     }
 
-    function hasUnits(r) {
-        var uc = (r.candidate_squad && r.candidate_squad.unit_counts) || {}, has = false;
-        Object.keys(uc).forEach(function (u) { if (parseInt(uc[u], 10) > 0) has = true; });
-        return has;
+    var MIN_UNITS = 10; /* Spielregel: ein Raubzug braucht mindestens 10 Einheiten */
+    function squadSize(r) {
+        var uc = (r.candidate_squad && r.candidate_squad.unit_counts) || {}, n = 0;
+        Object.keys(uc).forEach(function (u) { n += Math.max(0, parseInt(uc[u], 10) || 0); });
+        return n;
     }
+    function hasUnits(r) { return squadSize(r) >= MIN_UNITS; }
+    function smallNote(n) { return n ? n + ' Züge mit weniger als ' + MIN_UNITS + ' Einheiten entfernt (Truppen bleiben zu Hause).' : ''; }
     function showPreview() {
         try {
-            var sq = typeof squads !== 'undefined' ? squads : null, groups = [], empty = 0;
+            var sq = typeof squads !== 'undefined' ? squads : null, groups = [], empty = 0, small = 0;
             captureVillages();
             Object.keys(sq).forEach(function (g) {
                 var all = sq[g] || [], reqs = all.filter(hasUnits);
-                empty += all.length - reqs.length;
+                all.forEach(function (r) { var n = squadSize(r); if (n === 0) empty++; else if (n < MIN_UNITS) small++; });
+                sq[g] = reqs; /* auch die Buttons des Originals schicken dann nur gültige Züge */
                 if (reqs.length) groups.push({ label: 'Gruppe ' + (+g + 1), reqs: reqs, orig: +g });
             });
-            buildPreview(groups, empty, '');
+            buildPreview(groups, empty, smallNote(small));
         } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message) + '<br><small>' + esc(dbg()) + '</small>'); }
     }
     function dbg() {
@@ -364,7 +402,8 @@ var premiumBtnEnabled = false;
             (empty ? '<div>' + empty + ' leere Züge ohne Truppen ausgeblendet.</div>' : '');
         if (!order.length) return box((notes ? '<div class="ms-note">' + notes + '</div>' : '') +
             '<b>Nichts zu verschicken.</b> Reserve/Max prüfen oder alle Stufen belegt.<br><small>' + esc(dbg()) + '</small>');
-        sendList = groups; sentCount = 0;
+        lastPreview = [groups, empty, note];
+        sendList = groups; sentCount = groups.filter(function (g) { return g.sent; }).length;
         var now = nowMs(), totLoot = 0, lastRet = 0, stageLoot = [0, 0, 0, 0, 0], units = {}, rows = '';
         order.forEach(function (vid, vi_idx) {
             var vi = villageInfo(vid), reqs = byVillage[vid], ri = runInfo[vid];
@@ -413,17 +452,20 @@ var premiumBtnEnabled = false;
             '<table class="ms-tab"><tr><th>Dorf</th><th>Stufe</th><th>Truppen</th><th class="r">Dauer</th><th class="r">Zurück</th><th class="r">Beute</th></tr>' +
             rows + '</table>';
         var foot = groups.map(function (gr, i) {
-            return '<input type="button" class="btn btn-confirm-yes" value="' + esc(gr.label) + ' abschicken" onclick="msSend(' + i + ',this)">';
+            return gr.sent ? '<input type="button" class="btn" disabled value="' + esc(gr.label) + ': Gesendet ✓">'
+                : '<input type="button" class="btn btn-confirm-yes" value="' + esc(gr.label) + ' abschicken" onclick="msSend(' + i + ',this)">';
         }).join('') + '<small style="margin-left:auto">Schätzwerte · Zeiten ab jetzt</small>';
         box(html, 'Raubzug-Vorschau', foot);
     }
 
-    var sentCount = 0;
-    function groupDone(btn, ok) {
+    var sentCount = 0, lastPreview = null;
+    function groupDone(gr, btn, ok) {
         btn.value = ok ? 'Gesendet ✓' : 'Fehler';
         if (!ok) return;
+        gr.sent = true;
         sentCount++;
         if (sentCount >= sendList.length) {
+            lastPreview = null;
             setTimeout(function () { closeAll(); UI.SuccessMessage('Raubzüge abgeschickt.'); }, 700);
         }
     }
@@ -431,10 +473,10 @@ var premiumBtnEnabled = false;
         var gr = sendList[i];
         if (!gr || btn.disabled) return;
         btn.disabled = true;
-        if (gr.orig != null && typeof sendGroup === 'function') { sendGroup(gr.orig, false); return groupDone(btn, true); }
+        if (gr.orig != null && typeof sendGroup === 'function') { sendGroup(gr.orig, false); return groupDone(gr, btn, true); }
         btn.value = 'Sende…';
         TribalWars.post('scavenge_api', { ajaxaction: 'send_squads' }, { squad_requests: gr.reqs },
-            function () { groupDone(btn, true); }, function () { groupDone(btn, false); });
+            function () { groupDone(gr, btn, true); }, function () { groupDone(gr, btn, false); });
     };
 
     /* ---------- Alle Profile nacheinander berechnen ---------- */
@@ -449,12 +491,19 @@ var premiumBtnEnabled = false;
     function runAll() {
         if (batching) return;
         storeActive();
-        var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = 0, failed = [];
+        var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = 0, small = 0, failed = [], usedGroups = {}, sameGroup = [];
+        /* Profile mit der Standardgruppe "alle" immer zuletzt, damit die spezielleren Gruppen zuerst ihre Dörfer bekommen */
+        var defG = lsGet('msDefaultGroup') || '0';
+        names = names.filter(function (n) { return resolveGroup(p.list[n].group) !== defG; })
+            .concat(names.filter(function (n) { return resolveGroup(p.list[n].group) === defG; }));
         batching = true; runInfo = {};
         function next() {
             if (i >= names.length) return finish();
             var name = names[i++], pr = p.list[name];
-            batchGroup = pr.group || '0';
+            batchGroup = resolveGroup(pr.group);
+            /* Gleiche Dorfgruppe wie ein früheres Profil -> alle Dörfer wären schon verplant, Profil überspringen */
+            if (usedGroups[batchGroup]) { sameGroup.push(name + ' (wie ' + usedGroups[batchGroup] + ')'); return next(); }
+            usedGroups[batchGroup] = name;
             box('Berechne Profil „' + esc(name) + '“ (' + i + '/' + names.length + ') …');
             applySettings(pr.settings);
             $('#massScavengeFinal').remove();
@@ -467,7 +516,9 @@ var premiumBtnEnabled = false;
                     var sq = JSON.parse(JSON.stringify(typeof squads !== 'undefined' && squads ? squads : {})), reqs = [];
                     Object.keys(sq).forEach(function (g) {
                         (sq[g] || []).forEach(function (r) {
-                            if (!hasUnits(r)) { empty++; return; }
+                            var n = squadSize(r);
+                            if (n === 0) { empty++; return; }
+                            if (n < MIN_UNITS) { small++; return; }
                             if (seen[r.village_id] && seen[r.village_id] !== name) { dup++; return; }
                             seen[r.village_id] = name;
                             r.use_premium = false;
@@ -494,9 +545,11 @@ var premiumBtnEnabled = false;
             applySettings(a.list[a.active].settings);
             $('#massScavengeFinal').remove();
             startOriginal();
-            var note = '<b>Alle Profile:</b> ' + names.length + ' berechnet' +
+            var note = '<b>Alle Profile:</b> ' + (names.length - sameGroup.length - failed.length) + ' berechnet' +
                 (dup ? ' · ' + dup + ' Züge übersprungen (Dorf schon in früherem Profil)' : '') +
-                (failed.length ? ' · <span style="color:#a00">fehlgeschlagen: ' + esc(failed.join(', ')) + '</span>' : '');
+                (sameGroup.length ? '<br>Übersprungen, gleiche Dorfgruppe: ' + esc(sameGroup.join(', ')) : '') +
+                (failed.length ? ' · <span style="color:#a00">fehlgeschlagen: ' + esc(failed.join(', ')) + '</span>' : '') +
+                (small ? '<br>' + smallNote(small) : '');
             try { buildPreview(groups, empty, note); } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message)); }
         }
         next();
@@ -504,9 +557,9 @@ var premiumBtnEnabled = false;
 
     function addPreviewButton() {
         var fin = $('#massScavengeFinal');
-        if (!fin.length || $('#msPreviewBtn').length) return;
-        window.msShowPreview = showPreview;
-        fin.prepend('<input type="button" class="btn" id="msPreviewBtn" value="Vorschau" style="margin:4px" onclick="msShowPreview()">');
+        if (!fin.length || fin.attr('data-ms')) return;
+        /* Das Launch-Fenster des Originals wird nicht mehr gebraucht - die Vorschau ersetzt es */
+        fin.attr('data-ms', '1').css('display', 'none');
         if (!batching) setTimeout(showPreview, 0);
     }
 
@@ -521,6 +574,7 @@ var premiumBtnEnabled = false;
         window.__msObserver.observe(document.body, { childList: true, subtree: true });
     }
 
+    loadGroups(function () {}); /* Standardgruppe "alle" früh ermitteln */
     /* Beim Start: Einstellungen des aktiven Profils laden, dann Original starten */
     var start = loadProfiles();
     applySettings(start.list[start.active].settings);

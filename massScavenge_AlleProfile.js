@@ -8,12 +8,14 @@ var premiumBtnEnabled = false;
     var PROFILE_KEY = 'msProfiles';
     /* Alle Einstellungen des Originals + Max, die pro Profil gespeichert werden */
     var runInfo = {};
+    function onlyCurrent() { return lsGet('msOnlyCurrent') === '1'; }
     /* Rückkehrzeit (Unix-Sekunden) des spätesten laufenden Raubzugs im Dorf, sonst null */
     function runningUntil(data) {
         var o = data && data.options, until = null;
         if (!o) return null;
         Object.keys(o).forEach(function (k) {
-            var sq = o[k] && o[k].scavenging_squad;
+            if (!o[k] || o[k].is_locked) return; /* nur freigeschaltete Stufen prüfen */
+            var sq = o[k].scavenging_squad;
             if (sq) { var t = +(sq.return_time || sq.finish_time || 0); until = Math.max(until || 0, t); }
         });
         return until;
@@ -108,6 +110,8 @@ var premiumBtnEnabled = false;
                 });
                 data = Object.assign({}, data, { unit_counts_home: capped });
             }
+            /* Checkbox "nur aktuelles Dorf" */
+            if (onlyCurrent() && data && String(data.village_id) !== String(game_data.village && game_data.village.id)) return;
             /* Laufender Raubzug im Dorf: neue Züge dürfen nicht länger laufen als der späteste laufende */
             var run = runningUntil(data);
             if (run === null) return origCalc.call(this, data);
@@ -171,10 +175,12 @@ var premiumBtnEnabled = false;
             '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
             '&nbsp; <b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
+            ' &nbsp; <label title="Nur das Dorf berechnen, in dem du gerade bist"><input type="checkbox" id="msOnlyCur"' + (onlyCurrent() ? ' checked' : '') + '> nur aktuelles Dorf</label>' +
             '</div>'
         );
 
         $('#msRunAll').on('click', runAll);
+        $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
         $('#msProfileNew').on('click', function () {
             var name = prompt('Name des neuen Profils:');
@@ -353,7 +359,8 @@ var premiumBtnEnabled = false;
                 byVillage[r.village_id].push(r);
             });
         });
-        var notes = (note ? '<div>' + note + '</div>' : '') + runNotes() +
+        var notes = (note ? '<div>' + note + '</div>' : '') +
+            (onlyCurrent() ? '<div>📍 Nur aktuelles Dorf: ' + esc((game_data.village && game_data.village.name) || '') + '</div>' : '') + runNotes() +
             (empty ? '<div>' + empty + ' leere Züge ohne Truppen ausgeblendet.</div>' : '');
         if (!order.length) return box((notes ? '<div class="ms-note">' + notes + '</div>' : '') +
             '<b>Nichts zu verschicken.</b> Reserve/Max prüfen oder alle Stufen belegt.<br><small>' + esc(dbg()) + '</small>');

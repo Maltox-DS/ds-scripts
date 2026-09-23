@@ -7,6 +7,17 @@ var premiumBtnEnabled = false;
     var MAX_KEY = 'maxSend';
     var PROFILE_KEY = 'msProfiles';
     /* Alle Einstellungen des Originals + Max, die pro Profil gespeichert werden */
+    var runInfo = {};
+    /* Rückkehrzeit (Unix-Sekunden) des spätesten laufenden Raubzugs im Dorf, sonst null */
+    function runningUntil(data) {
+        var o = data && data.options, until = null;
+        if (!o) return null;
+        Object.keys(o).forEach(function (k) {
+            var sq = o[k] && o[k].scavenging_squad;
+            if (sq) { var t = +(sq.return_time || sq.finish_time || 0); until = Math.max(until || 0, t); }
+        });
+        return until;
+    }
     var batching = false, batchGroup = null, vilMap = {}, sendList = [];
     var SETTING_KEYS = ['troopTypeEnabled', 'keepHome', 'categoryEnabled', 'prioritiseHighCat',
                         'timeElement', 'sendOrder', 'runTimes', MAX_KEY];
@@ -97,11 +108,22 @@ var premiumBtnEnabled = false;
                 });
                 data = Object.assign({}, data, { unit_counts_home: capped });
             }
-            return origCalc.call(this, data);
+            /* Laufender Raubzug im Dorf: neue Züge dürfen nicht länger laufen als der späteste laufende */
+            var run = runningUntil(data);
+            if (run === null) return origCalc.call(this, data);
+            var remain = run - nowMs() / 1000, vid = data.village_id;
+            var minDur = ((typeof duration_initial_seconds !== 'undefined' ? duration_initial_seconds : 0) + 60) *
+                         (typeof duration_factor !== 'undefined' && duration_factor ? duration_factor : 1);
+            if (!(remain > minDur) || typeof time === 'undefined' || !time) { runInfo[vid] = { skip: true, until: run }; return; }
+            var hrs = remain / 3600, oldOff = time.off, oldDef = time.def;
+            runInfo[vid] = { until: run, capped: (hrs < oldOff || hrs < oldDef) };
+            time.off = Math.min(oldOff, hrs); time.def = Math.min(oldDef, hrs);
+            try { return origCalc.call(this, data); } finally { time.off = oldOff; time.def = oldDef; }
         };
         /* Nach "Laufzeiten berechnen" speichert das Original seine Einstellungen -> ins aktive Profil übernehmen */
         var origReady = window.readyToSend;
         window.readyToSend = function () {
+            if (!batching) runInfo = {};
             var r = origReady.apply(this, arguments);
             storeActive();
             return r;
@@ -269,15 +291,59 @@ var premiumBtnEnabled = false;
     function dbg() {
         try { return 'squads=' + JSON.stringify(typeof squads !== 'undefined' ? squads : 'undefiniert').slice(0, 300); } catch (e) { return 'squads: ' + e.message; }
     }
-    function box(html) {
+    function img(path, t) {
+        var base = (typeof image_base !== 'undefined' && image_base) ? image_base : '/graphic/';
+        return '<img src="' + base + path + '" title="' + (t || '') + '" style="width:16px;height:16px;vertical-align:-3px">';
+    }
+    function unitIcon(u) { return img('unit/unit_' + u + '.png', UNIT_DE[u] || u); }
+    var RES_ICONS = function () { return img('holz.png', 'Holz') + img('lehm.png', 'Lehm') + img('eisen.png', 'Eisen'); };
+
+    function injectStyle() {
+        if (document.getElementById('msPreviewStyle')) return;
+        var st = document.createElement('style');
+        st.id = 'msPreviewStyle';
+        st.textContent =
+            '#msPreviewBox{position:fixed;top:40px;left:0;right:0;margin:auto;width:fit-content;max-width:95vw;z-index:2147483647;' +
+            'background:#f4e4bc;color:#000;border:2px solid #804000;border-radius:4px;box-shadow:0 6px 24px rgba(0,0,0,.5);font:12px Verdana,Arial,sans-serif}' +
+            '#msPreviewBox .ms-head{background:linear-gradient(#c1a264,#a4884d);color:#000;padding:6px 10px;font-weight:bold;font-size:14px;border-bottom:1px solid #804000;display:flex;justify-content:space-between;align-items:center;gap:12px}' +
+            '#msPreviewBox .ms-body{padding:10px;max-height:70vh;overflow:auto}' +
+            '#msPreviewBox .ms-tiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}' +
+            '#msPreviewBox .ms-tile{background:#fff5da;border:1px solid #c1a264;border-radius:3px;padding:6px 10px;min-width:110px}' +
+            '#msPreviewBox .ms-tile small{display:block;color:#6b4a1a;font-size:10px;text-transform:uppercase;letter-spacing:.5px}' +
+            '#msPreviewBox .ms-tile b{font-size:14px}' +
+            '#msPreviewBox .ms-note{background:#fff5da;border-left:3px solid #804000;padding:4px 8px;margin-bottom:8px}' +
+            '#msPreviewBox table.ms-tab{border-collapse:collapse;width:100%;font-size:12px}' +
+            '#msPreviewBox table.ms-tab th{background:#c1a264;padding:4px 6px;text-align:left;border:1px solid #a4884d;white-space:nowrap}' +
+            '#msPreviewBox table.ms-tab td{padding:3px 6px;border:1px solid #dcc79a;vertical-align:middle}' +
+            '#msPreviewBox table.ms-tab tr.v0 td{background:#fff5da}#msPreviewBox table.ms-tab tr.v1 td{background:#f0e2be}' +
+            '#msPreviewBox .ms-st{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#804000;color:#fff;font-weight:bold;font-size:11px}' +
+            '#msPreviewBox .ms-u{white-space:nowrap;margin-right:8px}' +
+            '#msPreviewBox .ms-run{color:#a05000;font-size:10px}' +
+            '#msPreviewBox .ms-foot{padding:8px 10px;border-top:1px solid #c1a264;background:#ecd9a8;display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
+            '#msPreviewBox .r{text-align:right;white-space:nowrap}';
+        document.head.appendChild(st);
+    }
+    function box(html, title, foot) {
+        injectStyle();
         var old = document.getElementById('msPreviewBox');
         if (old) old.parentNode.removeChild(old);
         var d = document.createElement('div');
         d.id = 'msPreviewBox';
-        d.style.cssText = 'position:fixed;top:40px;left:0;right:0;margin:auto;width:fit-content;z-index:2147483647;background:#f4e4bc;color:#000;border:2px solid #7d510f;padding:10px;max-width:95vw';
-        d.innerHTML = '<button type="button" class="btn" style="float:right">Schließen</button>' + html;
-        d.firstChild.onclick = function () { d.parentNode.removeChild(d); };
+        d.innerHTML = '<div class="ms-head"><span>' + (title || 'Raubzug-Vorschau') + '</span><button type="button" class="btn ms-close">✕</button></div>' +
+            '<div class="ms-body">' + html + '</div>' + (foot ? '<div class="ms-foot">' + foot + '</div>' : '');
+        d.querySelector('.ms-close').onclick = function () { d.parentNode.removeChild(d); };
         document.body.appendChild(d);
+    }
+    function closeAll() {
+        ['msPreviewBox', 'massScavengeFinal', 'massScavengeSophie'].forEach(function (id) {
+            var e = document.getElementById(id); if (e) e.parentNode.removeChild(e);
+        });
+    }
+    function runNotes() {
+        var skip = 0, cap = 0;
+        Object.keys(runInfo).forEach(function (v) { if (runInfo[v].skip) skip++; else if (runInfo[v].capped) cap++; });
+        return (cap ? '<div>⏱ ' + cap + ' Dörfer mit laufendem Raubzug: Laufzeit auf dessen Rückkehr gekürzt.</div>' : '') +
+               (skip ? '<div>⏱ ' + skip + ' Dörfer übersprungen: laufender Raubzug kommt zu bald zurück.</div>' : '');
     }
     function buildPreview(groups, empty, note) {
         var byVillage = {}, order = [], prof = {};
@@ -287,15 +353,14 @@ var premiumBtnEnabled = false;
                 byVillage[r.village_id].push(r);
             });
         });
-        if (!order.length) return box('<b>Nichts zu verschicken</b> – ' + (empty ? empty + ' Züge ohne Truppen. ' : '') + 'Reserve/Max prüfen oder Stufen belegt.' + (note ? '<br>' + note : '') + '<br><small>' + esc(dbg()) + '</small>');
-        sendList = groups;
-        var sendBtns = groups.map(function (gr, i) {
-            return '<input type="button" class="btn" style="margin:4px" value="' + esc(gr.label) + ' abschicken" onclick="msSend(' + i + ',this)">';
-        }).join('');
-        var now = nowMs(), totLoot = 0, lastRet = 0, stageLoot = [0, 0, 0, 0, 0], units = {};
-        var rows = '';
-        order.forEach(function (vid) {
-            var vi = villageInfo(vid), reqs = byVillage[vid], vLoot = 0;
+        var notes = (note ? '<div>' + note + '</div>' : '') + runNotes() +
+            (empty ? '<div>' + empty + ' leere Züge ohne Truppen ausgeblendet.</div>' : '');
+        if (!order.length) return box((notes ? '<div class="ms-note">' + notes + '</div>' : '') +
+            '<b>Nichts zu verschicken.</b> Reserve/Max prüfen oder alle Stufen belegt.<br><small>' + esc(dbg()) + '</small>');
+        sendList = groups; sentCount = 0;
+        var now = nowMs(), totLoot = 0, lastRet = 0, stageLoot = [0, 0, 0, 0, 0], units = {}, rows = '';
+        order.forEach(function (vid, vi_idx) {
+            var vi = villageInfo(vid), reqs = byVillage[vid], ri = runInfo[vid];
             reqs.sort(function (a, b) { return a.option_id - b.option_id; });
             reqs.forEach(function (r, idx) {
                 var uc = (r.candidate_squad && r.candidate_squad.unit_counts) || {}, cap = 0, txt = [];
@@ -303,7 +368,7 @@ var premiumBtnEnabled = false;
                     var n = parseInt(uc[u], 10) || 0;
                     if (n > 0) {
                         cap += n * (CARRY[u] || 0);
-                        txt.push(fmt(n) + ' ' + (UNIT_DE[u] || u));
+                        txt.push('<span class="ms-u">' + unitIcon(u) + ' ' + fmt(n) + '</span>');
                         units[u] = (units[u] || 0) + n;
                     }
                 });
@@ -314,39 +379,55 @@ var premiumBtnEnabled = false;
                     ret = fmtTime(now + dur * 1000);
                     lastRet = Math.max(lastRet, now + dur * 1000);
                 }
-                vLoot += loot; totLoot += loot; stageLoot[r.option_id] += loot;
-                rows += '<tr>' +
-                    (idx === 0 ? '<td rowspan="' + reqs.length + '"><b>' + esc(vi.name) + '</b>' + (prof[vid] ? '<br><small>' + esc(prof[vid]) + '</small>' : '') + '</td>' : '') +
-                    '<td>' + r.option_id + '</td>' +
-                    '<td>' + (txt.join(', ') || '–') + '</td>' +
-                    '<td>' + (dur != null ? fmtDur(dur) : '?') + '</td>' +
-                    '<td>' + ret + '</td>' +
-                    '<td style="text-align:right">' + fmt(loot) + '</td></tr>';
+                totLoot += loot; stageLoot[r.option_id] += loot;
+                rows += '<tr class="v' + (vi_idx & 1) + '">' +
+                    (idx === 0 ? '<td rowspan="' + reqs.length + '"><a href="' + game_data.link_base_pure + 'info_village&id=' + vid + '" target="_blank"><b>' + esc(vi.name) + '</b></a>' +
+                        (prof[vid] ? '<br><small>' + esc(prof[vid]) + '</small>' : '') +
+                        (ri && ri.capped ? '<br><span class="ms-run">⏱ läuft bis ' + fmtTime(ri.until * 1000) + '</span>' : '') + '</td>' : '') +
+                    '<td style="text-align:center"><span class="ms-st">' + r.option_id + '</span></td>' +
+                    '<td>' + (txt.join('') || '–') + '</td>' +
+                    '<td class="r">' + (dur != null ? fmtDur(dur) : '?') + '</td>' +
+                    '<td class="r">' + ret + '</td>' +
+                    '<td class="r">' + fmt(loot) + '</td></tr>';
             });
         });
-        var unitSum = Object.keys(units).map(function (u) { return fmt(units[u]) + ' ' + (UNIT_DE[u] || u); }).join(', ');
+        var unitSum = Object.keys(units).map(function (u) { return '<span class="ms-u">' + unitIcon(u) + ' ' + fmt(units[u]) + '</span>'; }).join('');
         var stageSum = [1, 2, 3, 4].filter(function (k) { return stageLoot[k] > 0; })
-            .map(function (k) { return 'Stufe ' + k + ': ' + fmt(stageLoot[k]); }).join(' · ');
+            .map(function (k) { return '<span class="ms-u"><span class="ms-st">' + k + '</span> ' + fmt(stageLoot[k]) + '</span>'; }).join('');
         var html =
-            '<div style="max-height:70vh;overflow:auto;min-width:640px">' +
-            '<h3>Raubzug-Vorschau</h3>' +
-            '<p>' + (note ? note + '<br>' : '') + (empty ? '<i>' + empty + ' leere Raubzüge ohne Truppen ausgeblendet.</i><br>' : '') + '<b>' + order.length + ' Dörfer</b> · Beute gesamt ca. <b>' + fmt(totLoot) + '</b> Rohstoffe' +
-            (lastRet ? ' · letzte Rückkehr ' + fmtTime(lastRet) : '') + '<br>' +
-            stageSum + '<br>Truppen: ' + unitSum + '</p>' +
-            '<table class="vis"><tr><th>Dorf</th><th>Stufe</th><th>Truppen</th><th>Dauer</th><th>Zurück</th><th>Beute</th></tr>' +
-            rows + '</table>' +
-            '<p><small>Schätzwerte, Zeiten ab jetzt.</small></p>' + sendBtns + '</div>';
-        box(html);
+            (notes ? '<div class="ms-note">' + notes + '</div>' : '') +
+            '<div class="ms-tiles">' +
+            '<div class="ms-tile"><small>Dörfer</small><b>' + order.length + '</b></div>' +
+            '<div class="ms-tile"><small>Beute gesamt (ca.)</small><b>' + fmt(totLoot) + '</b><br>' + RES_ICONS() + ' je ~' + fmt(totLoot / 3) + '</div>' +
+            '<div class="ms-tile"><small>Letzte Rückkehr</small><b>' + (lastRet ? fmtTime(lastRet) : '?') + '</b></div>' +
+            '<div class="ms-tile"><small>Beute je Stufe</small>' + stageSum + '</div>' +
+            '<div class="ms-tile"><small>Truppen</small>' + unitSum + '</div>' +
+            '</div>' +
+            '<table class="ms-tab"><tr><th>Dorf</th><th>Stufe</th><th>Truppen</th><th class="r">Dauer</th><th class="r">Zurück</th><th class="r">Beute</th></tr>' +
+            rows + '</table>';
+        var foot = groups.map(function (gr, i) {
+            return '<input type="button" class="btn btn-confirm-yes" value="' + esc(gr.label) + ' abschicken" onclick="msSend(' + i + ',this)">';
+        }).join('') + '<small style="margin-left:auto">Schätzwerte · Zeiten ab jetzt</small>';
+        box(html, 'Raubzug-Vorschau', foot);
     }
 
+    var sentCount = 0;
+    function groupDone(btn, ok) {
+        btn.value = ok ? 'Gesendet ✓' : 'Fehler';
+        if (!ok) return;
+        sentCount++;
+        if (sentCount >= sendList.length) {
+            setTimeout(function () { closeAll(); UI.SuccessMessage('Raubzüge abgeschickt.'); }, 700);
+        }
+    }
     window.msSend = function (i, btn) {
         var gr = sendList[i];
-        if (!gr) return;
+        if (!gr || btn.disabled) return;
         btn.disabled = true;
-        if (gr.orig != null && typeof sendGroup === 'function') { sendGroup(gr.orig, false); btn.value = 'Gesendet'; return; }
+        if (gr.orig != null && typeof sendGroup === 'function') { sendGroup(gr.orig, false); return groupDone(btn, true); }
         btn.value = 'Sende…';
         TribalWars.post('scavenge_api', { ajaxaction: 'send_squads' }, { squad_requests: gr.reqs },
-            function () { btn.value = 'Gesendet ✓'; }, function () { btn.value = 'Fehler'; });
+            function () { groupDone(btn, true); }, function () { groupDone(btn, false); });
     };
 
     /* ---------- Alle Profile nacheinander berechnen ---------- */
@@ -362,7 +443,7 @@ var premiumBtnEnabled = false;
         if (batching) return;
         storeActive();
         var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = 0, failed = [];
-        batching = true;
+        batching = true; runInfo = {};
         function next() {
             if (i >= names.length) return finish();
             var name = names[i++], pr = p.list[name];

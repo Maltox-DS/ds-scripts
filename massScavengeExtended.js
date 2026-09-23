@@ -146,7 +146,14 @@ var premiumBtnEnabled = false;
         var origReady = window.readyToSend;
         window.readyToSend = function () {
             if (!batching) runInfo = {};
-            var r = origReady.apply(this, arguments);
+            /* Das Original entfernt beim Berechnen sein Einstellungsfenster (getData). Damit "Berechnen"
+               mehrfach funktioniert, wird es kurz umbenannt und danach zurückbenannt. Altes Launch-Fenster weg. */
+            $('#massScavengeFinal').remove();
+            var so = document.getElementById('massScavengeSophie');
+            if (so) so.id = 'msSophieKeep';
+            var r;
+            try { r = origReady.apply(this, arguments); }
+            finally { var k = document.getElementById('msSophieKeep'); if (k) k.id = 'massScavengeSophie'; }
             storeActive();
             return r;
         };
@@ -214,7 +221,8 @@ var premiumBtnEnabled = false;
         }).join('');
         var actions = newUi ? '' :
             '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
-            '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ';
+            '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
+            '<button type="button" class="btn" id="msOverview" title="Laufende Raubzüge und Restzeiten aller Dörfer anzeigen">Übersicht</button> ';
         box.prepend(
             '<div id="msProfileBar" style="' + (newUi ? '' : 'padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0') + '">' +
             '<b>Profil:</b> <select id="msProfileSel">' + opts + '</select> ' +
@@ -227,6 +235,7 @@ var premiumBtnEnabled = false;
         );
 
         $('#msRunAll').off('click').on('click', runAll);
+        $('#msOverview').off('click').on('click', showOverview);
         $('#msCalc').off('click').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
@@ -514,7 +523,7 @@ var premiumBtnEnabled = false;
         }
     }
     /* Mindestens 200 ms zwischen zwei Sende-Anfragen (höchstens 5 pro Sekunde, wie im Original) */
-    var SEND_GAP = 200, lastSend = 0, sendQueue = Promise.resolve();
+    var SEND_GAP = 210, lastSend = 0, sendQueue = Promise.resolve();
     function throttled(fn) {
         sendQueue = sendQueue.then(function () {
             return new Promise(function (res) {
@@ -613,6 +622,82 @@ var premiumBtnEnabled = false;
             try { buildPreview(groups, empty, note); } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message)); }
         }
         next();
+    }
+
+    /* ================= Übersicht laufender Raubzüge =================
+       Lädt die Massen-Raubzug-Seiten (nacheinander, mind. 200 ms Abstand) und zeigt pro Dorf und Stufe
+       die Restzeit. Es wird nichts verändert oder gesendet. */
+    function extractVillages(html) {
+        var i = html.indexOf('[{"village_id"');
+        if (i < 0) return [];
+        var depth = 0, inStr = false, esc2 = false;
+        for (var j = i; j < html.length; j++) {
+            var c = html[j];
+            if (inStr) { if (esc2) esc2 = false; else if (c === '\\') esc2 = true; else if (c === '"') inStr = false; continue; }
+            if (c === '"') inStr = true;
+            else if (c === '[' || c === '{') depth++;
+            else if (c === ']' || c === '}') { depth--; if (depth === 0) { try { return JSON.parse(html.slice(i, j + 1)); } catch (e) { return []; } } }
+        }
+        return [];
+    }
+    function pageCount(html) {
+        var max = 0, re = /mode=scavenge_mass[^"']*?[?&]page=(\d+)/g, m;
+        while ((m = re.exec(html))) max = Math.max(max, +m[1]);
+        return max + 1;
+    }
+    var ovTimer = null;
+    function showOverview() {
+        box('Lade Raubzüge …', 'Raubzug-Übersicht');
+        var base = 'game.php?screen=place&mode=scavenge_mass', all = [], pages = 1, p = 0, last = 0;
+        if (game_data.player && game_data.player.sitter > 0) base = 'game.php?t=' + game_data.player.id + '&screen=place&mode=scavenge_mass';
+        (function next() {
+            if (p >= pages) return renderOverview(all);
+            var wait = Math.max(0, last + 210 - Date.now());
+            setTimeout(function () {
+                last = Date.now();
+                $.get(base + '&page=' + p).done(function (html) {
+                    if (p === 0) pages = Math.min(pageCount(html), 50);
+                    all = all.concat(extractVillages(html));
+                    p++; next();
+                }).fail(function () { box('<b>Übersicht konnte nicht geladen werden.</b>', 'Raubzug-Übersicht'); });
+            }, wait);
+        })();
+    }
+    function renderOverview(list) {
+        if (onlyCurrent()) list = list.filter(function (v) { return String(v.village_id) === String(game_data.village && game_data.village.id); });
+        if (!list.length) return box('Keine Dörfer gefunden.', 'Raubzug-Übersicht');
+        var stamp = nowMs(), free = 0, running = 0;
+        var rows = list.map(function (v, idx) {
+            var cells = [1, 2, 3, 4].map(function (k) {
+                var o = v.options && v.options[k];
+                if (!o || o.is_locked) return '<td class="r" style="color:#8a7550">🔒</td>';
+                var sq = o.scavenging_squad;
+                if (!sq) { free++; return '<td class="r" style="color:#2f6614;font-weight:bold">frei</td>'; }
+                running++;
+                var rt = +(sq.return_time || 0);
+                return rt ? '<td class="r ms-cd" data-rt="' + rt + '" title="zurück ' + fmtTime(rt * 1000) + '"></td>' : '<td class="r">läuft</td>';
+            }).join('');
+            return '<tr class="v' + (idx & 1) + '"><td><a href="' + game_data.link_base_pure + 'info_village&id=' + v.village_id + '" target="_blank"><b>' + esc(v.village_name || v.village_id) + '</b></a></td>' + cells + '</tr>';
+        }).join('');
+        var html =
+            '<div class="ms-tiles"><div class="ms-tile"><small>Dörfer</small><b>' + list.length + '</b></div>' +
+            '<div class="ms-tile"><small>Laufende Raubzüge</small><b>' + running + '</b></div>' +
+            '<div class="ms-tile"><small>Freie Stufen</small><b style="color:#2f6614">' + free + '</b></div></div>' +
+            '<table class="ms-tab"><tr><th>Dorf</th>' + [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</th>'; }).join('') + '</tr>' + rows + '</table>';
+        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 = nicht freigeschaltet</small>');
+        function tick() {
+            var cds = document.querySelectorAll('#msPreviewBox .ms-cd');
+            if (!cds.length) { clearInterval(ovTimer); ovTimer = null; return; }
+            var now = nowMs() / 1000;
+            for (var i = 0; i < cds.length; i++) {
+                var left = +cds[i].getAttribute('data-rt') - now;
+                if (left <= 0) { cds[i].textContent = 'zurück'; cds[i].style.color = '#2f6614'; cds[i].style.fontWeight = 'bold'; }
+                else { var h = Math.floor(left / 3600), m = Math.floor((left - h * 3600) / 60), sec = Math.floor(left - h * 3600 - m * 60);
+                       cds[i].textContent = h + ':' + ('0' + m).slice(-2) + ':' + ('0' + sec).slice(-2); }
+            }
+        }
+        if (ovTimer) clearInterval(ovTimer);
+        tick(); ovTimer = setInterval(tick, 1000);
     }
 
     function addPreviewButton() {
@@ -748,6 +833,7 @@ var premiumBtnEnabled = false;
             '</div></div></div></div>' +
             '<div class="ms-f"><button type="button" class="btn btn-confirm-yes" id="msCalc">▶ Berechnen</button>' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile berechnen</button>' +
+            '<button type="button" class="btn" id="msOverview" title="Laufende Raubzüge und Restzeiten aller Dörfer anzeigen">Übersicht</button>' +
             '<span class="sp"></span><span class="ms-hint">Basis: Mass scavenging · Shinko to Kuma</span></div>';
         var ui = $('<div id="msNewUI"></div>').html(html).appendTo('body');
         fitHeight(ui[0]);

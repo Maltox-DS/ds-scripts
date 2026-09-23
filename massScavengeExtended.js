@@ -313,7 +313,12 @@ var premiumBtnEnabled = false;
     }
     function captureVillages() {
         var list = (typeof scavengeInfo !== 'undefined' && scavengeInfo) || [];
-        list.forEach(function (v) { if (v && v.village_id != null) vilMap[v.village_id] = { name: v.village_name || v.name || v.village_id, cf: v.unit_carry_factor || 1 }; });
+        list.forEach(function (v) {
+            if (!v || v.village_id == null) return;
+            var free = null;
+            if (v.options) { free = 0; Object.keys(v.options).forEach(function (k) { var o = v.options[k]; if (o && !o.is_locked && !o.scavenging_squad) free++; }); }
+            vilMap[v.village_id] = { name: v.village_name || v.name || v.village_id, cf: v.unit_carry_factor || 1, free: free };
+        });
     }
     function villageInfo(id) {
         if (vilMap[id]) return vilMap[id];
@@ -335,14 +340,16 @@ var premiumBtnEnabled = false;
     function smallNote(n) { return n ? n + ' Züge mit weniger als ' + MIN_UNITS + ' Einheiten entfernt (Truppen bleiben zu Hause).' : ''; }
     function showPreview() {
         try {
-            var sq = typeof squads !== 'undefined' ? squads : null, groups = [], empty = 0, small = 0;
+            var sq = typeof squads !== 'undefined' ? squads : null, groups = [], empty = {}, small = 0, valid = {};
             captureVillages();
             Object.keys(sq).forEach(function (g) {
                 var all = sq[g] || [], reqs = all.filter(hasUnits);
-                all.forEach(function (r) { var n = squadSize(r); if (n === 0) empty++; else if (n < MIN_UNITS) small++; });
+                all.forEach(function (r) { var n = squadSize(r); empty[r.village_id] = 1; if (n > 0 && n < MIN_UNITS) small++; });
+                reqs.forEach(function (r) { valid[r.village_id] = 1; });
                 sq[g] = reqs; /* auch die Buttons des Originals schicken dann nur gültige Züge */
                 if (reqs.length) groups.push({ label: 'Gruppe ' + (+g + 1), reqs: reqs, orig: +g });
             });
+            Object.keys(valid).forEach(function (v) { delete empty[v]; });
             buildPreview(groups, empty, smallNote(small));
         } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message) + '<br><small>' + esc(dbg()) + '</small>'); }
     }
@@ -405,11 +412,25 @@ var premiumBtnEnabled = false;
             var e = document.getElementById(id); if (e) e.parentNode.removeChild(e);
         });
     }
-    function runNotes() {
-        var skip = 0, cap = 0;
-        Object.keys(runInfo).forEach(function (v) { if (runInfo[v].skip) skip++; else if (runInfo[v].capped) cap++; });
-        return (cap ? '<div>⏱ ' + cap + ' Dörfer mit laufendem Raubzug: Laufzeit auf dessen Rückkehr gekürzt.</div>' : '') +
-               (skip ? '<div>⏱ ' + skip + ' Dörfer übersprungen: laufender Raubzug kommt zu bald zurück.</div>' : '');
+    function vNames(ids) {
+        var n = ids.map(function (v) { return esc(String(villageInfo(v).name).replace(/\s*\(.*$/, '')); });
+        return n.length > 8 ? n.slice(0, 8).join(', ') + ' … (+' + (n.length - 8) + ')' : n.join(', ');
+    }
+    /* Hinweise: warum Dörfer gekürzt, übersprungen oder ohne Züge sind */
+    function runNotes(inPlan, idle) {
+        var cap = [], skip = [], busy = [], noTroops = [];
+        Object.keys(runInfo).forEach(function (v) {
+            if (runInfo[v].skip) skip.push(v);
+            else if (runInfo[v].capped && inPlan[v]) cap.push(v);
+        });
+        Object.keys(idle || {}).forEach(function (v) {
+            if (runInfo[v] && runInfo[v].skip) return;
+            (villageInfo(v).free === 0 ? busy : noTroops).push(v);
+        });
+        return (cap.length ? '<div>⏱ Laufzeit gekürzt, damit die neuen Züge mit dem laufenden Raubzug zurückkommen: ' + vNames(cap) + '</div>' : '') +
+               (skip.length ? '<div>⏱ Übersprungen, laufender Raubzug kommt zu bald zurück: ' + vNames(skip) + '</div>' : '') +
+               (busy.length ? '<div>Nichts zu senden, alle Stufen laufen noch: ' + vNames(busy) + '</div>' : '') +
+               (noTroops.length ? '<div>Nichts zu senden, zu wenig Truppen (Reserve/Max, mind. ' + MIN_UNITS + ' Einheiten): ' + vNames(noTroops) + '</div>' : '');
     }
     function buildPreview(groups, empty, note) {
         var byVillage = {}, order = [], prof = {};
@@ -420,8 +441,8 @@ var premiumBtnEnabled = false;
             });
         });
         var notes = (note ? '<div>' + note + '</div>' : '') +
-            (onlyCurrent() ? '<div>📍 Nur aktuelles Dorf: ' + esc((game_data.village && game_data.village.name) || '') + '</div>' : '') + runNotes() +
-            (empty ? '<div>' + empty + ' leere Züge ohne Truppen ausgeblendet.</div>' : '');
+            (onlyCurrent() ? '<div>📍 Nur aktuelles Dorf: ' + esc((game_data.village && game_data.village.name) || '') + '</div>' : '') +
+            runNotes(byVillage, empty);
         if (!order.length) return box((notes ? '<div class="ms-note">' + notes + '</div>' : '') +
             '<b>Nichts zu verschicken.</b> Reserve/Max prüfen oder alle Stufen belegt.<br><small>' + esc(dbg()) + '</small>');
         lastPreview = [groups, empty, note];
@@ -527,7 +548,7 @@ var premiumBtnEnabled = false;
     function runAll() {
         if (batching) return;
         storeActive();
-        var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = 0, small = 0, failed = [], usedGroups = {}, sameGroup = [];
+        var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = {}, small = 0, failed = [], usedGroups = {}, sameGroup = [];
         /* Profile mit der Standardgruppe "alle" immer zuletzt, damit die spezielleren Gruppen zuerst ihre Dörfer bekommen */
         var defG = lsGet('msDefaultGroup') || '0';
         names = names.filter(function (n) { return resolveGroup(p.list[n].group) !== defG; })
@@ -553,7 +574,8 @@ var premiumBtnEnabled = false;
                     Object.keys(sq).forEach(function (g) {
                         (sq[g] || []).forEach(function (r) {
                             var n = squadSize(r);
-                            if (n === 0) { empty++; return; }
+                            if (!(r.village_id in seen)) empty[r.village_id] = 1;
+                            if (n === 0) return;
                             if (n < MIN_UNITS) { small++; return; }
                             if (seen[r.village_id] && seen[r.village_id] !== name) { dup++; return; }
                             seen[r.village_id] = name;
@@ -586,6 +608,7 @@ var premiumBtnEnabled = false;
                 (sameGroup.length ? '<br>Übersprungen, gleiche Dorfgruppe: ' + esc(sameGroup.join(', ')) : '') +
                 (failed.length ? ' · <span style="color:#a00">fehlgeschlagen: ' + esc(failed.join(', ')) + '</span>' : '') +
                 (small ? '<br>' + smallNote(small) : '');
+            Object.keys(seen).forEach(function (v) { delete empty[v]; });
             try { buildPreview(groups, empty, note); } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message)); }
         }
         next();

@@ -148,7 +148,7 @@ var premiumBtnEnabled = false;
             var unit = this.id.replace(/Backup$/, '');
             if (document.getElementById(unit + 'Max')) return;
             $(this).after(
-                '<br><font title="Maximal pro Dorf losschicken (leer/0 = kein Limit)">Max</font><br>' +
+                '<br><span title="Maximal pro Dorf losschicken (leer/0 = kein Limit)" style="color:#fff;font-weight:bold">Max</span><br>' +
                 '<input type="text" id="' + unit + 'Max" size="5" placeholder="∞" value="' + (max[unit] || '') + '">'
             );
             $('#' + unit + 'Max').on('input change', function () {
@@ -168,13 +168,13 @@ var premiumBtnEnabled = false;
             return '<option value="' + esc(n) + '"' + (n === p.active ? ' selected' : '') + '>' + esc(n) + '</option>';
         }).join('');
         box.prepend(
-            '<div id="msProfileBar" style="padding:6px;background:#f4e4bc;color:#000">' +
+            '<div id="msProfileBar" style="padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px">' +
             '<b>Profil:</b> <select id="msProfileSel">' + opts + '</select> ' +
             '<button type="button" class="btn" id="msProfileNew">Neu</button> ' +
             '<button type="button" class="btn" id="msProfileRen">Umbenennen</button> ' +
             '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
-            '&nbsp; <b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
+            '<br><b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
             ' &nbsp; <label title="Nur das Dorf berechnen, in dem du gerade bist"><input type="checkbox" id="msOnlyCur"' + (onlyCurrent() ? ' checked' : '') + '> nur aktuelles Dorf</label>' +
             '</div>'
         );

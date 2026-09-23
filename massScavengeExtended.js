@@ -378,7 +378,14 @@ var premiumBtnEnabled = false;
             '#msPreviewBox .ms-u{white-space:nowrap;margin-right:8px}' +
             '#msPreviewBox .ms-run{color:#a05000;font-size:10px}' +
             '#msPreviewBox .ms-foot{padding:8px 10px;border-top:1px solid #c1a264;background:#ecd9a8;display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
-            '#msPreviewBox .r{text-align:right;white-space:nowrap}';
+            '#msPreviewBox .r{text-align:right;white-space:nowrap}' +
+            '#msPreviewBox table.ms-tab th{background:#c1a264!important;color:#000!important;background-image:none!important}' +
+            '@media (max-width:760px){' +
+            '#msPreviewBox{top:0;width:100vw;max-width:100vw;border-radius:0;border-left:0;border-right:0}' +
+            '#msPreviewBox .ms-body{overflow-x:auto;padding:8px}' +
+            '#msPreviewBox .ms-tile{min-width:0;flex:1 1 40%}' +
+            '#msPreviewBox .ms-foot{flex-wrap:wrap}' +
+            '}';
         document.head.appendChild(st);
     }
     function box(html, title, foot) {
@@ -391,6 +398,7 @@ var premiumBtnEnabled = false;
             '<div class="ms-body">' + html + '</div>' + (foot ? '<div class="ms-foot">' + foot + '</div>' : '');
         d.querySelector('.ms-close').onclick = function () { d.parentNode.removeChild(d); };
         document.body.appendChild(d);
+        d.style.overflowY = 'auto'; fitHeight(d);
     }
     function closeAll() {
         ['msPreviewBox', 'massScavengeFinal', 'massScavengeSophie', 'msNewUI'].forEach(function (id) {
@@ -639,7 +647,21 @@ var premiumBtnEnabled = false;
             '#msNewUI .ms-radio label{flex:1;border:1px solid #c1a264;border-radius:3px;padding:6px;background:#fbf0d0;cursor:pointer}' +
             '#msNewUI .ms-radio label.a{border-color:#804000;background:#f7e2b0;box-shadow:inset 0 0 0 1px #804000}' +
             '#msNewUI .ms-f{display:flex;gap:6px;align-items:center;padding:8px 10px;border-top:1px solid #c1a264;background:#ecd9a8;position:sticky;bottom:0}' +
-            '#msNewUI .ms-f .sp{flex:1}';
+            '#msNewUI .ms-f .sp{flex:1}' +
+            '#msNewUI table.ms-u th{background:#e3cf9b!important;color:#5a3c10!important;background-image:none!important}' +
+            '#msNewUI .ms-mv{display:none;white-space:nowrap}#msNewUI .ms-mv button{padding:2px 6px;margin:0 1px;font-size:11px}' +
+            /* Handy / schmale Bildschirme */
+            '@media (max-width:760px){' +
+            '#msNewUI{top:0;width:100vw;max-width:100vw;border-radius:0;border-left:0;border-right:0;font-size:13px}' +
+            '#msNewUI .ms-h{flex-wrap:wrap;font-size:13px;padding:6px 8px}#msNewUI .ms-h small{display:none}' +
+            '#msNewUI .ms-barslot{padding:6px 8px}' +
+            '#msNewUI .ms-grid{grid-template-columns:1fr;padding:8px;gap:8px}' +
+            '#msNewUI table.ms-u td,#msNewUI table.ms-u th{padding:4px 3px}' +
+            '#msNewUI input.ms-num{width:52px}' +
+            '#msNewUI .ms-grip{display:none}#msNewUI .ms-mv{display:inline}#msNewUI .ms-card h4 small{display:none}' +
+            '#msNewUI .ms-rt{grid-template-columns:auto 1fr}#msNewUI .ms-rt .ms-hint{grid-column:1/-1}' +
+            '#msNewUI .ms-f{flex-wrap:wrap}#msNewUI .ms-f .sp,#msNewUI .ms-f .ms-hint{display:none}' +
+            '}';
         document.head.appendChild(st);
     }
 
@@ -648,6 +670,15 @@ var premiumBtnEnabled = false;
         return n > 0 ? 'zurück ca. ' + fmtTime(nowMs() + n * 3600000) : '';
     }
 
+    /* Höhe an den sichtbaren Bereich anpassen; auf dem Handy Platz für die untere App-Leiste lassen */
+    function fitHeight(el) {
+        function fit() {
+            if (!document.body.contains(el)) return window.removeEventListener('resize', fit);
+            var small = window.innerWidth <= 760, top = Math.max(0, el.getBoundingClientRect().top);
+            el.style.maxHeight = Math.max(200, window.innerHeight - top - (small ? 100 : 10)) + 'px';
+        }
+        fit(); window.addEventListener('resize', fit);
+    }
     function buildNewUi() {
         injectUiStyle();
         $('#msNewUI').remove();
@@ -655,7 +686,7 @@ var premiumBtnEnabled = false;
         var rows = units.map(function (u) {
             var on = $('#imgRow :checkbox[name="' + u + '"]').is(':checked');
             return '<tr data-u="' + u + '" class="' + (on ? '' : 'off') + '" draggable="true">' +
-                '<td class="ms-grip" title="Ziehen zum Sortieren">≡</td>' +
+                '<td><span class="ms-grip" title="Ziehen zum Sortieren">≡</span><span class="ms-mv"><button type="button" class="btn ms-up" title="nach oben">▲</button><button type="button" class="btn ms-dn" title="nach unten">▼</button></span></td>' +
                 '<td>' + unitIcon(u) + ' ' + (UNIT_DE[u] || u) + '</td>' +
                 '<td style="text-align:center"><input type="checkbox" class="ms-use"' + (on ? ' checked' : '') + '></td>' +
                 '<td style="text-align:right"><input type="text" class="ms-num ms-keep" value="' + esc($('#' + u + 'Backup').val() || 0) + '"></td>' +
@@ -696,6 +727,7 @@ var premiumBtnEnabled = false;
             '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Letzte Vorschau</button>' +
             '<span class="sp"></span><span class="ms-hint">Basis: Mass scavenging · Shinko to Kuma</span></div>';
         var ui = $('<div id="msNewUI"></div>').html(html).appendTo('body');
+        fitHeight(ui[0]);
 
         /* --- Einheiten --- */
         ui.find('.ms-use').on('change', function () {
@@ -722,10 +754,13 @@ var premiumBtnEnabled = false;
                 var r = this.getBoundingClientRect(), after = e.originalEvent.clientY > r.top + r.height / 2;
                 if (after) $(this).after(dragRow); else $(this).before(dragRow);
             })
-            .on('drop', function (e) {
-                e.preventDefault();
-                ui.find('tr[data-u]').each(function () { var c = unitCol($(this).attr('data-u')); c.parent().append(c); });
-            });
+            .on('drop', function (e) { e.preventDefault(); applyOrder(); });
+        function applyOrder() {
+            ui.find('tr[data-u]').each(function () { var c = unitCol($(this).attr('data-u')); c.parent().append(c); });
+        }
+        /* Handy: Pfeile statt Ziehen */
+        ui.find('.ms-up').on('click', function () { var r = $(this).closest('tr'), p = r.prev('tr[data-u]'); if (p.length) { p.before(r); applyOrder(); } });
+        ui.find('.ms-dn').on('click', function () { var r = $(this).closest('tr'), n = r.next('tr[data-u]'); if (n.length) { n.after(r); applyOrder(); } });
         /* --- Stufen --- */
         ui.find('.ms-cat').on('change', function () {
             $('#category' + $(this).attr('data-k')).prop('checked', this.checked);

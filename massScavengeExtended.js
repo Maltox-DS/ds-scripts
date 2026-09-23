@@ -1,6 +1,8 @@
 /* Mass Scavenge Extended by Maltox
    Erweiterung für "Mass scavenging" von Shinko to Kuma (Max, Profile, Dorfgruppe, Vorschau, Alle Profile, neues Fenster)
-   Laden per Schnellleiste:  javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0; */
+   Laden per Schnellleiste:  javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
+   Nur Übersicht:            javascript:window.msMode='overview';$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
+   Nur Statistik:            javascript:window.msMode='stats';$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0; */
 var premiumBtnEnabled = false;
 
 (function () {
@@ -1141,6 +1143,15 @@ var premiumBtnEnabled = false;
             addPreviewButton();
         });
         window.__msObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    /* Direktstart aus der Schnellleiste: window.msMode = 'overview' oder 'stats'
+       -> nur Übersicht bzw. Statistik öffnen, ohne das Einstellungsfenster und ohne Shinkos Skript */
+    var directMode = window.msMode;
+    window.msMode = null;
+    if (directMode === 'overview' || directMode === 'stats') {
+        loadGroups(function () { if (directMode === 'stats') showStats(); else showOverview(); });
+        return;
     }
 
     loadGroups(function () {}); /* Standardgruppe "alle" früh ermitteln */

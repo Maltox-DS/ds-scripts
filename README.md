@@ -11,6 +11,13 @@ Das Originalskript wird unverändert geladen, die Erweiterung hängt sich nur ei
 javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
 ```
 
+Nur die Übersicht bzw. nur die Statistik als eigener Schnellleisten-Eintrag:
+
+```
+javascript:window.msMode='overview';$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
+javascript:window.msMode='stats';$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/massScavengeExtended.js');void 0;
+```
+
 Nach einem Update kann es etwas dauern, bis jsDelivr die neue Version unter `@main` ausliefert.
 Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`).
 

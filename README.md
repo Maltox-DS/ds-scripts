@@ -33,8 +33,7 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
 - **Vorschau** – öffnet sich nach „Calculate runtimes“ automatisch: Truppen je Stufe, Dauer,
   Rückkehr, geschätzte Beute, mit Stämme-Icons. Abschicken direkt aus der Vorschau,
   jede Gruppe per eigenem Klick. Nach dem letzten Senden schließen sich alle Fenster.
-  Das Launch-Fenster des Originals wird nicht mehr angezeigt; über „Vorschau“ in der Leiste
-  lässt sich die letzte Berechnung wieder öffnen.
+  Das Launch-Fenster des Originals wird nicht mehr angezeigt.
 - **Mindestens 10 Einheiten** – Züge mit weniger als 10 Einheiten werden entfernt.
 
 ## Alte Datei

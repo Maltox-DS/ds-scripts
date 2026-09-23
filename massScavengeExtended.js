@@ -208,7 +208,6 @@ var premiumBtnEnabled = false;
         }).join('');
         var actions = newUi ? '' :
             '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
-            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Vorschau</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ';
         box.prepend(
             '<div id="msProfileBar" style="' + (newUi ? '' : 'padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0') + '">' +
@@ -223,10 +222,6 @@ var premiumBtnEnabled = false;
 
         $('#msRunAll').off('click').on('click', runAll);
         $('#msCalc').off('click').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
-        $('#msReopen').off('click').on('click', function () {
-            if (!lastPreview) return box('Noch nichts berechnet – erst <b>Calculate runtimes</b> klicken.');
-            buildPreview.apply(null, lastPreview);
-        });
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
         $('#msProfileNew').on('click', function () {
@@ -747,7 +742,6 @@ var premiumBtnEnabled = false;
             '</div></div></div></div>' +
             '<div class="ms-f"><button type="button" class="btn btn-confirm-yes" id="msCalc">▶ Berechnen</button>' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile berechnen</button>' +
-            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Letzte Vorschau</button>' +
             '<span class="sp"></span><span class="ms-hint">Basis: Mass scavenging · Shinko to Kuma</span></div>';
         var ui = $('<div id="msNewUI"></div>').html(html).appendTo('body');
         fitHeight(ui[0]);

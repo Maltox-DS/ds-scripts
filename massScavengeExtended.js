@@ -72,8 +72,12 @@ var premiumBtnEnabled = false;
     }
 
     var groupCache = null;
+    var groupWaiters = null; /* läuft die Abfrage schon, warten weitere Aufrufer auf dasselbe Ergebnis */
     function loadGroups(cb) {
         if (groupCache) return cb(groupCache);
+        if (groupWaiters) { groupWaiters.push(cb); return; }
+        groupWaiters = [cb];
+        function finish(r) { var w = groupWaiters || []; groupWaiters = null; w.forEach(function (f) { f(r); }); }
         $.get(game_data.link_base_pure + 'groups&mode=overview&ajax=load_group_menu')
             .done(function (d) {
                 try {
@@ -88,9 +92,9 @@ var premiumBtnEnabled = false;
                     if (!groupCache.length) groupCache = null;
                     else lsSet('msDefaultGroup', def || groupCache[0].id);
                 } catch (e) { groupCache = null; }
-                cb(groupCache);
+                finish(groupCache);
             })
-            .fail(function () { cb(null); });
+            .fail(function () { finish(null); });
     }
 
     /* ---------- Max pro Einheit ---------- */
@@ -479,15 +483,29 @@ var premiumBtnEnabled = false;
             setTimeout(function () { closeAll(); UI.SuccessMessage('Raubzüge abgeschickt.'); }, 700);
         }
     }
+    /* Mindestens 200 ms zwischen zwei Sende-Anfragen (höchstens 5 pro Sekunde, wie im Original) */
+    var SEND_GAP = 200, lastSend = 0, sendQueue = Promise.resolve();
+    function throttled(fn) {
+        sendQueue = sendQueue.then(function () {
+            return new Promise(function (res) {
+                var wait = Math.max(0, lastSend + SEND_GAP - Date.now());
+                setTimeout(function () { lastSend = Date.now(); try { fn(); } finally { res(); } }, wait);
+            });
+        });
+    }
     window.msSend = function (i, btn) {
         var gr = sendList[i];
         if (!gr || btn.disabled) return;
         btn.disabled = true;
+        btn.value = 'Sende…';
+        throttled(function () { doSend(gr, btn); });
+    };
+    function doSend(gr, btn) {
         if (gr.orig != null && typeof sendGroup === 'function') { sendGroup(gr.orig, false); return groupDone(gr, btn, true); }
         btn.value = 'Sende…';
         TribalWars.post('scavenge_api', { ajaxaction: 'send_squads' }, { squad_requests: gr.reqs },
             function () { groupDone(gr, btn, true); }, function () { groupDone(gr, btn, false); });
-    };
+    }
 
     /* ---------- Alle Profile nacheinander berechnen ---------- */
     function waitFinal(cb) {

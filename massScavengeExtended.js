@@ -667,24 +667,65 @@ var premiumBtnEnabled = false;
         if (onlyCurrent()) list = list.filter(function (v) { return String(v.village_id) === String(game_data.village && game_data.village.id); });
         if (!list.length) return box('Keine Dörfer gefunden.', 'Raubzug-Übersicht');
         var stamp = nowMs(), free = 0, running = 0;
+        function fmtDate(ms) {
+            var d = new Date(ms);
+            return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear() + ' ' +
+                   ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+        }
+        /* Beute eines laufenden Zugs: bevorzugt die Angabe des Spiels (loot_res), sonst Schätzung */
+        var lootTot = { wood: 0, stone: 0, iron: 0 }, lootEst = false;
+        function squadLoot(sq, k, cf) {
+            var lr = sq.loot_res || sq.loot;
+            if (lr && typeof lr === 'object') return { wood: +lr.wood || 0, stone: +lr.stone || 0, iron: +lr.iron || 0, est: false };
+            var cap = +sq.carry_max && +sq.carry_max < 1e9 ? +sq.carry_max : 0;
+            if (!cap && sq.unit_counts) Object.keys(sq.unit_counts).forEach(function (u) { cap += (+sq.unit_counts[u] || 0) * (CARRY[u] || 0); });
+            if (!cap) return null;
+            var t = cap * (cf || 1) * optParams(k).lf / 3;
+            return { wood: t, stone: t, iron: t, est: true };
+        }
+        var lastList = [], firstV = null, lastV = null;
         var rows = list.map(function (v, idx) {
+            var lastRt = 0;
+            [1, 2, 3, 4].forEach(function (k) { var o = v.options && v.options[k]; if (o && !o.is_locked && o.scavenging_squad) lastRt = Math.max(lastRt, +(o.scavenging_squad.return_time || 0)); });
+            if (lastRt) {
+                lastList.push(lastRt);
+                if (!firstV || lastRt < firstV.t) firstV = { t: lastRt, v: v };
+                if (!lastV || lastRt > lastV.t) lastV = { t: lastRt, v: v };
+            }
+            var vLoot = 0;
+            var lastCell = '<td class="r ms-last" data-last="' + lastRt + '">' + (lastRt ? fmtDate(lastRt * 1000) : '–') + '</td>';
             var cells = [1, 2, 3, 4].map(function (k) {
                 var o = v.options && v.options[k];
                 if (!o || o.is_locked) return '<td class="r" style="color:#8a7550">🔒</td>';
                 var sq = o.scavenging_squad;
                 if (!sq) { free++; return '<td class="r" style="color:#2f6614;font-weight:bold">frei</td>'; }
                 running++;
+                var lt = squadLoot(sq, k, v.unit_carry_factor);
+                if (lt) { lootTot.wood += lt.wood; lootTot.stone += lt.stone; lootTot.iron += lt.iron; vLoot += lt.wood + lt.stone + lt.iron; if (lt.est) lootEst = true; }
                 var rt = +(sq.return_time || 0);
                 return rt ? '<td class="r ms-cd" data-rt="' + rt + '" title="zurück ' + fmtTime(rt * 1000) + '"></td>' : '<td class="r">läuft</td>';
             }).join('');
-            return '<tr class="v' + (idx & 1) + '"><td><a href="' + game_data.link_base_pure + 'info_village&id=' + v.village_id + '" target="_blank"><b>' + esc(v.village_name || v.village_id) + '</b></a></td>' + cells + '</tr>';
+            return '<tr class="v' + (idx & 1) + '"><td><a href="' + game_data.link_base_pure + 'info_village&id=' + v.village_id + '" target="_blank"><b>' + esc(v.village_name || v.village_id) + '</b></a></td>' + lastCell + cells +
+                '<td class="r">' + (vLoot ? fmt(vLoot) : '–') + '</td></tr>';
         }).join('');
         var html =
             '<div class="ms-tiles"><div class="ms-tile"><small>Dörfer</small><b>' + list.length + '</b></div>' +
             '<div class="ms-tile"><small>Laufende Raubzüge</small><b>' + running + '</b></div>' +
-            '<div class="ms-tile"><small>Freie Stufen</small><b style="color:#2f6614">' + free + '</b></div></div>' +
-            '<table class="ms-tab"><tr><th>Dorf</th>' + [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</th>'; }).join('') + '</tr>' + rows + '</table>';
-        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 = nicht freigeschaltet</small>');
+            '<div class="ms-tile"><small>Freie Stufen</small><b style="color:#2f6614">' + free + '</b></div>' +
+            (firstV ? '<div class="ms-tile" style="border-color:#6f8f3a;background:#e8f0d0"><small>Erste Rückkehr</small><b style="color:#2f6614">' + fmtDate(firstV.t * 1000) + '</b><br>' + esc(firstV.v.village_name || firstV.v.village_id) + '</div>' : '') +
+            (lastV && lastV !== firstV ? '<div class="ms-tile" style="border-color:#b3261a;background:#f6e0db"><small>Letzte Rückkehr</small><b style="color:#b3261a">' + fmtDate(lastV.t * 1000) + '</b><br>' + esc(lastV.v.village_name || lastV.v.village_id) + '</div>' : '') +
+            '<div class="ms-tile"><small>Beute unterwegs' + (lootEst ? ' (ca.)' : '') + '</small><b>' + fmt(lootTot.wood + lootTot.stone + lootTot.iron) + '</b><br>' +
+            img('holz.png', 'Holz') + ' ' + fmt(lootTot.wood) + ' &nbsp;' + img('lehm.png', 'Lehm') + ' ' + fmt(lootTot.stone) + ' &nbsp;' + img('eisen.png', 'Eisen') + ' ' + fmt(lootTot.iron) + '</div></div>' +
+            '<table class="ms-tab"><tr><th>Dorf</th><th class="r">Letzte Rückkehr</th>' + [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</th>'; }).join('') + '<th class="r">Beute' + (lootEst ? ' (ca.)' : '') + '</th></tr>' + rows + '</table>';
+        box(html, 'Raubzug-Übersicht', '<small>Restzeit läuft live mit · 🔒 = nicht freigeschaltet · <span style="color:#2f6614;font-weight:bold">grün</span> = kommt zuerst zurück, <span style="color:#b3261a;font-weight:bold">rot</span> = zuletzt</small>');
+        if (lastList.length > 1) {
+            var mn = Math.min.apply(null, lastList), mx = Math.max.apply(null, lastList);
+            $('#msPreviewBox .ms-last').each(function () {
+                var t = +this.getAttribute('data-last');
+                if (t === mn) $(this).css({ color: '#2f6614', 'font-weight': 'bold', background: '#e3f0cf' });
+                else if (t === mx) $(this).css({ color: '#b3261a', 'font-weight': 'bold', background: '#f6d9d4' });
+            });
+        }
         function tick() {
             var cds = document.querySelectorAll('#msPreviewBox .ms-cd');
             if (!cds.length) { clearInterval(ovTimer); ovTimer = null; return; }

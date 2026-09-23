@@ -149,6 +149,11 @@ var premiumBtnEnabled = false;
             /* Das Original entfernt beim Berechnen sein Einstellungsfenster (getData). Damit "Berechnen"
                mehrfach funktioniert, wird es kurz umbenannt und danach zurückbenannt. Altes Launch-Fenster weg. */
             $('#massScavengeFinal').remove();
+            /* Ergebnisse der vorigen Berechnung löschen – das Original sammelt sonst weiter an (doppelte Züge) */
+            if (typeof squad_requests !== 'undefined') squad_requests = [];
+            if (typeof squad_requests_premium !== 'undefined') squad_requests_premium = [];
+            if (typeof squads !== 'undefined') squads = {};
+            if (typeof squads_premium !== 'undefined') squads_premium = {};
             var so = document.getElementById('massScavengeSophie');
             if (so) so.id = 'msSophieKeep';
             var r;

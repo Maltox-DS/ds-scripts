@@ -189,32 +189,36 @@ var premiumBtnEnabled = false;
     }
 
     function addProfileBar() {
-        var box = $('#massScavengeSophie');
+        var slot = $('#msNewUI .ms-barslot'), newUi = slot.length > 0;
+        var box = newUi ? slot : $('#massScavengeSophie');
         if (!box.length || $('#msProfileBar').length) return;
-        /* Fenster an die Bildschirmhöhe anpassen und scrollbar machen */
-        var top = Math.max(0, box[0].getBoundingClientRect().top);
-        box.css({ 'max-height': 'calc(100vh - ' + (Math.round(top) + 10) + 'px)', 'overflow-y': 'auto' });
+        if (!newUi) {
+            /* Fallback (altes Fenster): an die Bildschirmhöhe anpassen und scrollbar machen */
+            var top = Math.max(0, box[0].getBoundingClientRect().top);
+            box.css({ 'max-height': 'calc(100vh - ' + (Math.round(top) + 10) + 'px)', 'overflow-y': 'auto' });
+        }
         var p = loadProfiles();
         var opts = Object.keys(p.list).map(function (n) {
             return '<option value="' + esc(n) + '"' + (n === p.active ? ' selected' : '') + '>' + esc(n) + '</option>';
         }).join('');
+        var actions = newUi ? '' :
+            '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
+            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Vorschau</button> ' +
+            '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ';
         box.prepend(
-            '<div id="msProfileBar" style="padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0">' +
+            '<div id="msProfileBar" style="' + (newUi ? '' : 'padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0') + '">' +
             '<b>Profil:</b> <select id="msProfileSel">' + opts + '</select> ' +
             '<button type="button" class="btn" id="msProfileNew">Neu</button> ' +
             '<button type="button" class="btn" id="msProfileRen">Umbenennen</button> ' +
-            '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' +
-            '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
-            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Vorschau</button> ' +
-            '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
-            '<br><b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
+            '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' + actions +
+            (newUi ? ' &nbsp; ' : '<br>') + '<b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
             ' &nbsp; <label title="Nur das Dorf berechnen, in dem du gerade bist"><input type="checkbox" id="msOnlyCur"' + (onlyCurrent() ? ' checked' : '') + '> nur aktuelles Dorf</label>' +
             '</div>'
         );
 
-        $('#msRunAll').on('click', runAll);
-        $('#msCalc').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
-        $('#msReopen').on('click', function () {
+        $('#msRunAll').off('click').on('click', runAll);
+        $('#msCalc').off('click').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
+        $('#msReopen').off('click').on('click', function () {
             if (!lastPreview) return box('Noch nichts berechnet – erst <b>Calculate runtimes</b> klicken.');
             buildPreview.apply(null, lastPreview);
         });
@@ -384,7 +388,7 @@ var premiumBtnEnabled = false;
         document.body.appendChild(d);
     }
     function closeAll() {
-        ['msPreviewBox', 'massScavengeFinal', 'massScavengeSophie'].forEach(function (id) {
+        ['msPreviewBox', 'massScavengeFinal', 'massScavengeSophie', 'msNewUI'].forEach(function (id) {
             var e = document.getElementById(id); if (e) e.parentNode.removeChild(e);
         });
     }
@@ -568,7 +572,196 @@ var premiumBtnEnabled = false;
         if (!batching) setTimeout(showPreview, 0);
     }
 
-    function addUi() { addProfileBar(); addMaxInputs(); }
+    /* ================= Neues Einstellungsfenster =================
+       Das Original bleibt unsichtbar im Hintergrund. Alle Eingaben werden in dessen
+       Felder geschrieben, gerechnet wird weiter mit readyToSend() des Originals. */
+    var STAGE_NAMES = ['', 'Faule Sammler', 'Bescheidene', 'Kluge Sammler', 'Großartige'];
+    function origOk() {
+        return $('#imgRow').length && $('#category1').length && $('#timeSelectorHours').length &&
+               $('.runTime_off').length && $('.runTime_def').length && $('#settingPriorityBalanced').length &&
+               typeof window.readyToSend === 'function';
+    }
+    function fire(el, ev) { if (el) el.dispatchEvent(new Event(ev || 'input', { bubbles: true })); }
+    function origUnits() { return $('#imgRow :checkbox').map(function () { return this.name; }).get(); }
+    function unitCol(u) { var cb = $('#imgRow :checkbox[name="' + u + '"]'); var c = cb.closest('#imgRow > *'); return c.length ? c : cb.parent(); }
+
+    function injectUiStyle() {
+        if (document.getElementById('msUiStyle')) return;
+        var st = document.createElement('style');
+        st.id = 'msUiStyle';
+        st.textContent =
+            '#msNewUI{position:fixed;top:30px;left:0;right:0;margin:auto;width:820px;max-width:96vw;max-height:calc(100vh - 40px);overflow:auto;z-index:12000;' +
+            'background:#f4e4bc;color:#000;border:2px solid #804000;border-radius:4px;box-shadow:0 6px 24px rgba(0,0,0,.45);font:12px Verdana,Arial,sans-serif}' +
+            '#msNewUI .ms-h{background:linear-gradient(#c1a264,#a4884d);padding:7px 10px;font-weight:bold;font-size:14px;border-bottom:1px solid #804000;display:flex;align-items:center;gap:8px;cursor:move;position:sticky;top:0;z-index:2}' +
+            '#msNewUI .ms-h .sp{flex:1}#msNewUI .ms-h small{font-weight:normal;font-size:11px;color:#5a3c10}' +
+            '#msNewUI .ms-barslot{padding:8px 10px;background:#ecd9a8;border-bottom:1px solid #c1a264;line-height:26px}' +
+            '#msNewUI .ms-grid{display:grid;grid-template-columns:1.15fr 1fr;gap:10px;padding:10px}' +
+            '#msNewUI .ms-col{display:flex;flex-direction:column;gap:10px}' +
+            '#msNewUI .ms-card{background:#fff5da;border:1px solid #c1a264;border-radius:3px}' +
+            '#msNewUI .ms-card h4{margin:0;padding:5px 8px;background:#e3cf9b;border-bottom:1px solid #c1a264;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#5a3c10;display:flex;justify-content:space-between}' +
+            '#msNewUI .ms-card h4 small{text-transform:none;letter-spacing:0;font-weight:normal;color:#7a5a2a}' +
+            '#msNewUI .ms-in{padding:8px}' +
+            '#msNewUI table.ms-u{border-collapse:collapse;width:100%;font-size:12px}' +
+            '#msNewUI table.ms-u th{font-size:10px;color:#6b4a1a;text-align:left;padding:4px 6px;border-bottom:1px solid #dcc79a}' +
+            '#msNewUI table.ms-u td{padding:4px 6px;border-bottom:1px solid #eadbb3}' +
+            '#msNewUI table.ms-u tr:nth-child(even) td{background:#fbf0d0}' +
+            '#msNewUI table.ms-u tr.off td{opacity:.45}#msNewUI table.ms-u tr.drag td{background:#f7e2b0}' +
+            '#msNewUI .ms-grip{color:#a4884d;cursor:grab;font-size:14px;user-select:none}' +
+            '#msNewUI input.ms-num{width:58px;text-align:right}' +
+            '#msNewUI .ms-stages{display:grid;grid-template-columns:1fr 1fr;gap:6px}' +
+            '#msNewUI .ms-stage{display:flex;align-items:center;gap:6px;border:1px solid #c1a264;border-radius:3px;padding:5px 7px;background:#fbf0d0;cursor:pointer}' +
+            '#msNewUI .ms-stage.on{background:#e8f0d0;border-color:#6f8f3a}' +
+            '#msNewUI .ms-st{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#804000;color:#fff;font-weight:bold;font-size:11px}' +
+            '#msNewUI .ms-seg{display:inline-flex;border:1px solid #a4884d;border-radius:3px;overflow:hidden;margin-bottom:8px}' +
+            '#msNewUI .ms-seg span{padding:3px 10px;background:#fbf0d0;cursor:pointer}#msNewUI .ms-seg span.a{background:#804000;color:#fff}' +
+            '#msNewUI .ms-rt{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center}' +
+            '#msNewUI .ms-hint{font-size:10px;color:#7a5a2a}' +
+            '#msNewUI .ms-radio{display:flex;gap:6px}' +
+            '#msNewUI .ms-radio label{flex:1;border:1px solid #c1a264;border-radius:3px;padding:6px;background:#fbf0d0;cursor:pointer}' +
+            '#msNewUI .ms-radio label.a{border-color:#804000;background:#f7e2b0;box-shadow:inset 0 0 0 1px #804000}' +
+            '#msNewUI .ms-f{display:flex;gap:6px;align-items:center;padding:8px 10px;border-top:1px solid #c1a264;background:#ecd9a8;position:sticky;bottom:0}' +
+            '#msNewUI .ms-f .sp{flex:1}';
+        document.head.appendChild(st);
+    }
+
+    function hoursHint(h) {
+        var n = parseFloat(String(h).replace(',', '.'));
+        return n > 0 ? 'zurück ca. ' + fmtTime(nowMs() + n * 3600000) : '';
+    }
+
+    function buildNewUi() {
+        injectUiStyle();
+        $('#msNewUI').remove();
+        var max = loadMax(), units = origUnits();
+        var rows = units.map(function (u) {
+            var on = $('#imgRow :checkbox[name="' + u + '"]').is(':checked');
+            return '<tr data-u="' + u + '" class="' + (on ? '' : 'off') + '" draggable="true">' +
+                '<td class="ms-grip" title="Ziehen zum Sortieren">≡</td>' +
+                '<td>' + unitIcon(u) + ' ' + (UNIT_DE[u] || u) + '</td>' +
+                '<td style="text-align:center"><input type="checkbox" class="ms-use"' + (on ? ' checked' : '') + '></td>' +
+                '<td style="text-align:right"><input type="text" class="ms-num ms-keep" value="' + esc($('#' + u + 'Backup').val() || 0) + '"></td>' +
+                '<td style="text-align:right"><input type="text" class="ms-num ms-max" placeholder="∞" title="' + MAX_TIP + '" value="' + (max[u] || '') + '"></td></tr>';
+        }).join('');
+        var stages = [1, 2, 3, 4].map(function (k) {
+            var on = $('#category' + k).is(':checked');
+            return '<label class="ms-stage' + (on ? ' on' : '') + '"><input type="checkbox" class="ms-cat" data-k="' + k + '"' + (on ? ' checked' : '') + '><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</label>';
+        }).join('');
+        var dateMode = $('#timeSelectorDate').is(':checked');
+        var bal = !$('#settingPriorityPriority').is(':checked');
+        var p = loadProfiles();
+        var html =
+            '<div class="ms-h"><span>⚔ Massenraubzug</span><small>· Profil „' + esc(p.active) + '“</small><span class="sp"></span>' +
+            '<button type="button" class="btn" id="msReset" title="Einstellungen des Originals zurücksetzen">↺ Reset</button>' +
+            '<button type="button" class="btn" id="msUiClose" title="Schließen">✕</button></div>' +
+            '<div class="ms-barslot"></div>' +
+            '<div class="ms-grid"><div class="ms-card"><h4>Einheiten <small>Reihenfolge per ≡ ziehen</small></h4>' +
+            '<table class="ms-u"><tr><th></th><th>Einheit</th><th style="text-align:center">nutzen</th><th style="text-align:right">Reserve</th><th style="text-align:right">Max</th></tr>' + rows + '</table>' +
+            '<div class="ms-in ms-hint">Reserve bleibt immer zu Hause · Max = höchstens so viele pro Dorf · leer = kein Limit</div></div>' +
+            '<div class="ms-col">' +
+            '<div class="ms-card"><h4>Stufen</h4><div class="ms-in ms-stages">' + stages + '</div></div>' +
+            '<div class="ms-card"><h4>Rückkehr</h4><div class="ms-in">' +
+            '<div class="ms-seg"><span data-m="h" class="' + (dateMode ? '' : 'a') + '">Laufzeit (Std.)</span><span data-m="d" class="' + (dateMode ? 'a' : '') + '">Uhrzeit</span></div>' +
+            '<div class="ms-rt ms-rt-h"' + (dateMode ? ' style="display:none"' : '') + '>' +
+            '<b>Off-Dörfer</b><input type="text" class="ms-h-off" style="width:70px" value="' + esc($('.runTime_off').val() || '') + '"><span class="ms-hint ms-hh-off"></span>' +
+            '<b>Deff-Dörfer</b><input type="text" class="ms-h-def" style="width:70px" value="' + esc($('.runTime_def').val() || '') + '"><span class="ms-hint ms-hh-def"></span></div>' +
+            '<div class="ms-rt ms-rt-d"' + (dateMode ? '' : ' style="display:none"') + '>' +
+            '<b>Off-Dörfer</b><span><input type="date" class="ms-d-offDay" value="' + esc($('#offDay').val() || '') + '"> <input type="time" class="ms-d-offTime" value="' + esc($('#offTime').val() || '') + '"></span><span></span>' +
+            '<b>Deff-Dörfer</b><span><input type="date" class="ms-d-defDay" value="' + esc($('#defDay').val() || '') + '"> <input type="time" class="ms-d-defTime" value="' + esc($('#defTime').val() || '') + '"></span><span></span></div>' +
+            '</div></div>' +
+            '<div class="ms-card"><h4>Verteilung</h4><div class="ms-in ms-radio">' +
+            '<label class="' + (bal ? 'a' : '') + '"><input type="radio" name="msPrio" value="b"' + (bal ? ' checked' : '') + '> <b>Ausgewogen</b><br><span class="ms-hint">gleichmäßig über alle Stufen</span></label>' +
+            '<label class="' + (bal ? '' : 'a') + '"><input type="radio" name="msPrio" value="p"' + (bal ? '' : ' checked') + '> <b>Höhere zuerst</b><br><span class="ms-hint">obere Stufen zuerst füllen</span></label>' +
+            '</div></div></div></div>' +
+            '<div class="ms-f"><button type="button" class="btn btn-confirm-yes" id="msCalc">▶ Berechnen</button>' +
+            '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile berechnen</button>' +
+            '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Letzte Vorschau</button>' +
+            '<span class="sp"></span><span class="ms-hint">Basis: Mass scavenging · Shinko to Kuma</span></div>';
+        var ui = $('<div id="msNewUI"></div>').html(html).appendTo('body');
+
+        /* --- Einheiten --- */
+        ui.find('.ms-use').on('change', function () {
+            var u = $(this).closest('tr').attr('data-u');
+            $('#imgRow :checkbox[name="' + u + '"]').prop('checked', this.checked);
+            $(this).closest('tr').toggleClass('off', !this.checked);
+        });
+        ui.find('.ms-keep').on('input change', function () {
+            var u = $(this).closest('tr').attr('data-u');
+            $('#' + u + 'Backup').val(this.value);
+        });
+        ui.find('.ms-max').each(function () {
+            var u = $(this).closest('tr').attr('data-u');
+            bindMax(this, u);
+            $(this).on('input change', function () { $('#' + u + 'Max').val(this.value); });
+        });
+        /* Reihenfolge per Drag & Drop -> Spalten im Original umsortieren (bestimmt sendOrder) */
+        var dragRow = null;
+        ui.find('tr[data-u]').on('dragstart', function (e) { dragRow = this; $(this).addClass('drag'); e.originalEvent.dataTransfer.effectAllowed = 'move'; try { e.originalEvent.dataTransfer.setData('text', 'x'); } catch (x) {} })
+            .on('dragend', function () { $(this).removeClass('drag'); dragRow = null; })
+            .on('dragover', function (e) {
+                if (!dragRow || dragRow === this) return;
+                e.preventDefault();
+                var r = this.getBoundingClientRect(), after = e.originalEvent.clientY > r.top + r.height / 2;
+                if (after) $(this).after(dragRow); else $(this).before(dragRow);
+            })
+            .on('drop', function (e) {
+                e.preventDefault();
+                ui.find('tr[data-u]').each(function () { var c = unitCol($(this).attr('data-u')); c.parent().append(c); });
+            });
+        /* --- Stufen --- */
+        ui.find('.ms-cat').on('change', function () {
+            $('#category' + $(this).attr('data-k')).prop('checked', this.checked);
+            $(this).closest('.ms-stage').toggleClass('on', this.checked);
+        });
+        /* --- Rückkehr --- */
+        function hh() { ui.find('.ms-hh-off').text(hoursHint(ui.find('.ms-h-off').val())); ui.find('.ms-hh-def').text(hoursHint(ui.find('.ms-h-def').val())); }
+        hh();
+        ui.find('.ms-seg span').on('click', function () {
+            var d = $(this).attr('data-m') === 'd';
+            ui.find('.ms-seg span').removeClass('a'); $(this).addClass('a');
+            ui.find('.ms-rt-h').toggle(!d); ui.find('.ms-rt-d').toggle(d);
+            var r = document.getElementById(d ? 'timeSelectorDate' : 'timeSelectorHours');
+            if (r) { r.checked = true; fire(r); fire(r, 'change'); }
+        });
+        ui.find('.ms-h-off').on('input', function () { var o = $('.runTime_off')[0]; o.value = this.value; fire(o); hh(); });
+        ui.find('.ms-h-def').on('input', function () { var o = $('.runTime_def')[0]; o.value = this.value; fire(o); hh(); });
+        ['offDay', 'offTime', 'defDay', 'defTime'].forEach(function (id) {
+            ui.find('.ms-d-' + id).on('input change', function () { var o = document.getElementById(id); if (o) { o.value = this.value; fire(o); } });
+        });
+        /* --- Verteilung --- */
+        ui.find('input[name=msPrio]').on('change', function () {
+            var r = document.getElementById(this.value === 'b' ? 'settingPriorityBalanced' : 'settingPriorityPriority');
+            if (r) { r.checked = true; fire(r, 'change'); }
+            ui.find('.ms-radio label').removeClass('a'); $(this).closest('label').addClass('a');
+        });
+        /* --- Kopfzeile --- */
+        ui.find('#msUiClose').on('click', function () { $('#msNewUI').remove(); $('#massScavengeSophie').remove(); });
+        ui.find('#msReset').on('click', function () {
+            if (typeof window.resetSettings === 'function' && confirm('Einstellungen des Originals zurücksetzen?')) window.resetSettings();
+        });
+        /* Fenster verschiebbar */
+        ui.find('.ms-h').on('mousedown', function (e) {
+            if ($(e.target).is('button')) return;
+            var el = ui[0], r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+            el.style.margin = '0'; el.style.right = 'auto';
+            function mv(ev) { el.style.left = (ev.clientX - dx) + 'px'; el.style.top = Math.max(0, ev.clientY - dy) + 'px'; }
+            function up() { $(document).off('mousemove', mv).off('mouseup', up); }
+            $(document).on('mousemove', mv).on('mouseup', up);
+            e.preventDefault();
+        });
+    }
+
+    function addUi() {
+        var so = $('#massScavengeSophie');
+        addMaxInputs();
+        if (batching) { so.css('display', 'none'); return; }
+        if (so.length && !so.attr('data-ms-ui') && origOk()) {
+            so.attr('data-ms-ui', '1').css('display', 'none');
+            buildNewUi();
+            addProfileBar();
+            return;
+        }
+        if (!$('#msNewUI').length) addProfileBar(); /* Fallback: Original sichtbar lassen, Leiste darin */
+    }
 
     if (window.__msObserver) window.__msObserver.disconnect();
     {

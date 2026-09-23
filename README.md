@@ -14,6 +14,9 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@f193513`)
 
 ## Funktionen
 
+- **Neues Einstellungsfenster** – kompaktes Fenster im Stämme-Stil (Einheiten mit Reserve/Max,
+  Stufen, Rückkehr, Verteilung). Das Original läuft unsichtbar im Hintergrund und rechnet weiter;
+  fehlen dessen Felder (z. B. nach einem Update von Shinko), wird automatisch das Original angezeigt.
 - **Max pro Einheit** – zusätzlich zur Reserve (Backup): höchstens so viele Truppen pro Dorf losschicken.
 - **Profile** – komplette Einstellungen speichern und umschalten (Neu / Umbenennen / Löschen).
 - **Dorfgruppe pro Profil** – jedes Profil rechnet nur mit den Dörfern seiner Gruppe

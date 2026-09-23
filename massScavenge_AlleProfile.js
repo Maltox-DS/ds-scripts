@@ -191,16 +191,20 @@ var premiumBtnEnabled = false;
     function addProfileBar() {
         var box = $('#massScavengeSophie');
         if (!box.length || $('#msProfileBar').length) return;
+        /* Fenster an die Bildschirmhöhe anpassen und scrollbar machen */
+        var top = Math.max(0, box[0].getBoundingClientRect().top);
+        box.css({ 'max-height': 'calc(100vh - ' + (Math.round(top) + 10) + 'px)', 'overflow-y': 'auto' });
         var p = loadProfiles();
         var opts = Object.keys(p.list).map(function (n) {
             return '<option value="' + esc(n) + '"' + (n === p.active ? ' selected' : '') + '>' + esc(n) + '</option>';
         }).join('');
         box.prepend(
-            '<div id="msProfileBar" style="padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px">' +
+            '<div id="msProfileBar" style="padding:6px 90px 6px 6px;background:#f4e4bc;color:#000;line-height:26px;position:sticky;top:0">' +
             '<b>Profil:</b> <select id="msProfileSel">' + opts + '</select> ' +
             '<button type="button" class="btn" id="msProfileNew">Neu</button> ' +
             '<button type="button" class="btn" id="msProfileRen">Umbenennen</button> ' +
             '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' +
+            '<button type="button" class="btn btn-confirm-yes" id="msCalc" title="Laufzeiten berechnen (wie der Button unten im Fenster)">Berechnen</button> ' +
             '<button type="button" class="btn" id="msReopen" title="Letzte Berechnung wieder als Vorschau anzeigen">Vorschau</button> ' +
             '<button type="button" class="btn" id="msRunAll" title="Alle Profile nacheinander berechnen, gemeinsame Vorschau">Alle Profile</button> ' +
             '<br><b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
@@ -209,6 +213,7 @@ var premiumBtnEnabled = false;
         );
 
         $('#msRunAll').on('click', runAll);
+        $('#msCalc').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
         $('#msReopen').on('click', function () {
             if (!lastPreview) return box('Noch nichts berechnet – erst <b>Calculate runtimes</b> klicken.');
             buildPreview.apply(null, lastPreview);

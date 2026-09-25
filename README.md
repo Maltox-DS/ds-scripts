@@ -31,7 +31,8 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
 - **Dorfgruppe pro Profil** – jedes Profil rechnet nur mit den Dörfern seiner Gruppe
   (Standard ist die spielinterne Gruppe „alle“).
 - **Nur aktuelles Dorf** – Checkbox, berechnet nur das Dorf, in dem man gerade ist.
-- **Alle Profile** – alle Profile nacheinander berechnen, gemeinsame Vorschau.
+- **Alle Profile** – Schritt für Schritt: jedes Profil wird mit einem eigenen Klick berechnet
+  („Weiter: … berechnen“), danach gemeinsame Vorschau (auch vorzeitig möglich, oder Abbrechen).
   Profile mit der Gruppe „alle“ laufen immer zuletzt, Profile mit gleicher Gruppe werden übersprungen,
   und ein Dorf in mehreren Gruppen wird nur vom ersten Profil verplant.
 - **Laufende Raubzüge** – läuft in einem Dorf schon ein Raubzug (nur freigeschaltete Stufen),
@@ -45,8 +46,9 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
   (früheste grün, späteste rot) und Beute unterwegs je Rohstoff. Funktioniert auch auf dem Handy.
 - **Rückkehr „Täglich um“** – dritte Zeit-Option: nur Uhrzeit eingeben (z. B. 08:00); ist sie schon vorbei,
   wird automatisch der nächste Tag genommen.
-- **Gruppe zurücksetzen** – nach dem Berechnen bzw. nach Übersicht/Statistik wechselt das Spiel wieder
-  auf die Dorfgruppe, die vorher ausgewählt war.
+- **Danach zur vorherigen Gruppe zurück** – optionaler Schalter (Standard: aus). Ist er an, wechselt das Spiel
+  nach dem Berechnen bzw. nach Übersicht/Statistik wieder auf die vorher ausgewählte Dorfgruppe
+  (eine zusätzliche Seitenabfrage).
 - **Statistik** – Effizienz auf einen Blick: Beute pro Stunde (mit 24-h-Hochrechnung), Beute unterwegs,
   Auslastung der Stufen, Truppen unterwegs vs. zu Hause, Leerlauf-Warnung (freie Stufe + Truppen zu Hause),
   nächste freie Stufe, erste/letzte Rückkehr, Beute je Stufe und eine Rangliste der Dörfer nach Beute/h.

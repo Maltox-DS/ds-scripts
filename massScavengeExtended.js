@@ -82,7 +82,9 @@ var premiumBtnEnabled = false;
     }
     /* Gruppe, die im Spiel vor dem Skript ausgewählt war – danach wird dorthin zurückgewechselt */
     if (window.__msOrigGroup == null && typeof game_data !== 'undefined' && game_data.group_id != null) window.__msOrigGroup = String(game_data.group_id);
+    function restoreOn() { return lsGet('msRestoreGroup') === '1'; }
     function restoreGroup() {
+        if (!restoreOn()) return;
         var orig = window.__msOrigGroup != null ? window.__msOrigGroup : lsGet('msDefaultGroup');
         if (orig == null || window.__msLastGroup == null || String(window.__msLastGroup) === String(orig)) return;
         setTimeout(function () {
@@ -274,6 +276,7 @@ var premiumBtnEnabled = false;
             '<button type="button" class="btn" id="msProfileDel">Löschen</button> ' + actions +
             (newUi ? ' &nbsp; ' : '<br>') + '<b>Dorfgruppe:</b> <span id="msGroupWrap">lädt…</span>' +
             ' &nbsp; <label title="Nur das Dorf berechnen, in dem du gerade bist"><input type="checkbox" id="msOnlyCur"' + (onlyCurrent() ? ' checked' : '') + '> nur aktuelles Dorf</label>' +
+            ' &nbsp; <label title="Nach Berechnen/Übersicht wieder die Dorfgruppe auswählen, die vorher im Spiel aktiv war (1 zusätzliche Seitenabfrage)"><input type="checkbox" id="msRestore"' + (restoreOn() ? ' checked' : '') + '> danach zur vorherigen Gruppe zurück</label>' +
             '</div>'
         );
 
@@ -281,6 +284,7 @@ var premiumBtnEnabled = false;
         $('#msOverview').off('click').on('click', showOverview);
         $('#msStats').off('click').on('click', showStats);
         $('#msCalc').off('click').on('click', function () { if (typeof window.readyToSend === 'function') window.readyToSend(); });
+        $('#msRestore').on('change', function () { lsSet('msRestoreGroup', this.checked ? '1' : '0'); });
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
         $('#msProfileNew').on('click', function () {
@@ -616,74 +620,126 @@ var premiumBtnEnabled = false;
             setTimeout(poll, 250);
         })();
     }
+    /* Schrittweise: jeder Klick berechnet genau EIN Profil. Nach jedem Profil wartet das Skript auf den
+       nächsten Klick ("Weiter: … berechnen"). Nach dem letzten Profil kommt die gemeinsame Vorschau. */
+    var batchState = null;
     function runAll() {
         if (batching) return;
         storeActive();
-        var p = loadProfiles(), names = Object.keys(p.list), i = 0, groups = [], seen = {}, dup = 0, empty = {}, small = 0, failed = [], usedGroups = {}, sameGroup = [];
+        var p = loadProfiles(), names = Object.keys(p.list);
         /* Profile mit der Standardgruppe "alle" immer zuletzt, damit die spezielleren Gruppen zuerst ihre Dörfer bekommen */
         var defG = lsGet('msDefaultGroup') || '0';
         names = names.filter(function (n) { return resolveGroup(p.list[n].group) !== defG; })
             .concat(names.filter(function (n) { return resolveGroup(p.list[n].group) === defG; }));
-        batching = true; runInfo = {};
-        function next() {
-            if (i >= names.length) return finish();
-            var name = names[i++], pr = p.list[name];
-            batchGroup = resolveGroup(pr.group);
-            /* Gleiche Dorfgruppe wie ein früheres Profil -> alle Dörfer wären schon verplant, Profil überspringen */
-            if (usedGroups[batchGroup]) { sameGroup.push(name + ' (wie ' + usedGroups[batchGroup] + ')'); return next(); }
-            usedGroups[batchGroup] = name;
-            box('Berechne Profil „' + esc(name) + '“ (' + i + '/' + names.length + ') …');
-            applySettings(pr.settings);
-            $('#massScavengeFinal').remove();
-            $.getScript(SCRIPT_URL, function () {
-                if (!installHooks()) { failed.push(name); return next(); }
-                try { readyToSend(); } catch (e) { failed.push(name); return next(); }
-                waitFinal(function (ok) {
-                    if (!ok) { failed.push(name); return next(); }
-                    captureVillages();
-                    var sq = JSON.parse(JSON.stringify(typeof squads !== 'undefined' && squads ? squads : {})), reqs = [];
-                    Object.keys(sq).forEach(function (g) {
-                        (sq[g] || []).forEach(function (r) {
-                            var n = squadSize(r);
-                            if (!(r.village_id in seen)) empty[r.village_id] = 1;
-                            if (n === 0) return;
-                            if (n < MIN_UNITS) { small++; return; }
-                            if (seen[r.village_id] && seen[r.village_id] !== name) { dup++; return; }
-                            seen[r.village_id] = name;
-                            r.use_premium = false;
-                            reqs.push(r);
-                        });
+        /* Profile mit gleicher Dorfgruppe wie ein früheres gleich aussortieren (alle Dörfer wären schon verplant) */
+        var usedGroups = {}, sameGroup = [], todo = [];
+        names.forEach(function (n) {
+            var g = resolveGroup(p.list[n].group);
+            if (usedGroups[g]) sameGroup.push(n + ' (wie ' + usedGroups[g] + ')');
+            else { usedGroups[g] = n; todo.push(n); }
+        });
+        runInfo = {};
+        batchState = { list: p.list, todo: todo, i: 0, groups: [], seen: {}, dup: 0, empty: {}, small: 0, failed: [], done: [], sameGroup: sameGroup };
+        stepBox();
+    }
+    function abortAll() {
+        if (!batchState) return;
+        batchState = null; batching = false; batchGroup = null;
+        var a = loadProfiles();
+        applySettings(a.list[a.active].settings);
+        $('#massScavengeFinal').remove();
+        startOriginal();
+        restoreGroup();
+    }
+    function stepBox(busy) {
+        var st = batchState; if (!st) return;
+        var n = st.todo.length, nextName = st.todo[st.i];
+        var rows = st.todo.map(function (name, k) {
+            var d = st.done.filter(function (x) { return x.name === name; })[0], state;
+            if (d) state = d.failed ? '<span style="color:#c00">fehlgeschlagen</span>' : '✔ ' + d.villages + ' Dörfer, ' + d.squads + ' Züge';
+            else if (busy && k === st.i) state = 'wird berechnet …';
+            else state = '<span style="color:#7a5a2a">offen</span>';
+            return '<tr><td>' + (k + 1) + '.</td><td><b>' + esc(name) + '</b></td><td>' + state + '</td></tr>';
+        }).join('');
+        var html = '<table class="vis" style="width:100%">' + rows + '</table>' +
+            (st.sameGroup.length ? '<p style="margin:6px 0 0">Übersprungen, gleiche Dorfgruppe: ' + esc(st.sameGroup.join(', ')) + '</p>' : '') +
+            '<p style="margin:6px 0 0;font-size:11px;color:#7a5a2a">Jedes Profil wird mit einem eigenen Klick berechnet. Abgeschickt wird erst aus der Vorschau.</p>';
+        var foot = busy ? '' :
+            (nextName != null ? '<button type="button" class="btn btn-confirm-yes" id="msStepNext">Weiter: „' + esc(nextName) + '“ berechnen</button> ' : '') +
+            (st.done.length ? '<button type="button" class="btn" id="msStepPrev">' + (nextName != null ? 'Vorschau jetzt zeigen' : 'Vorschau zeigen') + '</button> ' : '') +
+            '<button type="button" class="btn" id="msStepAbort">Abbrechen</button>';
+        box(html, 'Alle Profile – ' + st.done.length + ' von ' + n + ' berechnet', foot);
+        var d = document.getElementById('msPreviewBox');
+        d.querySelector('.ms-close').onclick = function () { d.parentNode.removeChild(d); if (!batching) abortAll(); };
+        $('#msStepNext').on('click', stepNext);
+        $('#msStepPrev').on('click', finishAll);
+        $('#msStepAbort').on('click', function () { d.parentNode.removeChild(d); abortAll(); });
+    }
+    function stepNext() {
+        var st = batchState; if (!st || batching || st.i >= st.todo.length) return;
+        var name = st.todo[st.i], pr = st.list[name];
+        batching = true; batchGroup = resolveGroup(pr.group);
+        stepBox(true);
+        applySettings(pr.settings);
+        $('#massScavengeFinal').remove();
+        function done(res) {
+            batching = false;
+            if (batchState !== st) return;
+            res.name = name; st.done.push(res); st.i++;
+            if (res.failed) st.failed.push(name);
+            if (st.i >= st.todo.length) return finishAll();
+            stepBox();
+        }
+        $.getScript(SCRIPT_URL, function () {
+            if (!installHooks()) return done({ failed: true });
+            try { readyToSend(); } catch (e) { return done({ failed: true }); }
+            waitFinal(function (ok) {
+                if (!ok) return done({ failed: true });
+                captureVillages();
+                var sq = JSON.parse(JSON.stringify(typeof squads !== 'undefined' && squads ? squads : {})), reqs = [];
+                Object.keys(sq).forEach(function (g) {
+                    (sq[g] || []).forEach(function (r) {
+                        var n = squadSize(r);
+                        if (!(r.village_id in st.seen)) st.empty[r.village_id] = 1;
+                        if (n === 0) return;
+                        if (n < MIN_UNITS) { st.small++; return; }
+                        if (st.seen[r.village_id] && st.seen[r.village_id] !== name) { st.dup++; return; }
+                        st.seen[r.village_id] = name;
+                        r.use_premium = false;
+                        reqs.push(r);
                     });
-                    /* in Pakete zu je 50 Dörfern aufteilen */
-                    var chunks = [], cur = [], vils = {};
-                    reqs.forEach(function (r) {
-                        if (!vils[r.village_id] && Object.keys(vils).length >= 50) { chunks.push(cur); cur = []; vils = {}; }
-                        vils[r.village_id] = 1; cur.push(r);
-                    });
-                    if (cur.length) chunks.push(cur);
-                    chunks.forEach(function (c, k) {
-                        groups.push({ label: name + (chunks.length > 1 ? ' (Teil ' + (k + 1) + ')' : ''), reqs: c, profile: name });
-                    });
-                    next();
                 });
+                /* in Pakete zu je 50 Dörfern aufteilen */
+                var chunks = [], cur = [], vils = {}, allV = {};
+                reqs.forEach(function (r) {
+                    if (!vils[r.village_id] && Object.keys(vils).length >= 50) { chunks.push(cur); cur = []; vils = {}; }
+                    vils[r.village_id] = 1; allV[r.village_id] = 1; cur.push(r);
+                });
+                if (cur.length) chunks.push(cur);
+                chunks.forEach(function (c, k) {
+                    st.groups.push({ label: name + (chunks.length > 1 ? ' (Teil ' + (k + 1) + ')' : ''), reqs: c, profile: name });
+                });
+                done({ villages: Object.keys(allV).length, squads: reqs.length });
             });
-        }
-        function finish() {
-            batching = false; batchGroup = null;
-            restoreGroup();
-            var a = loadProfiles();
-            applySettings(a.list[a.active].settings);
-            $('#massScavengeFinal').remove();
-            startOriginal();
-            var note = '<b>Alle Profile:</b> ' + (names.length - sameGroup.length - failed.length) + ' berechnet' +
-                (dup ? ' · ' + dup + ' Züge übersprungen (Dorf schon in früherem Profil)' : '') +
-                (sameGroup.length ? '<br>Übersprungen, gleiche Dorfgruppe: ' + esc(sameGroup.join(', ')) : '') +
-                (failed.length ? ' · <span style="color:#a00">fehlgeschlagen: ' + esc(failed.join(', ')) + '</span>' : '') +
-                (small ? '<br>' + smallNote(small) : '');
-            Object.keys(seen).forEach(function (v) { delete empty[v]; });
-            try { buildPreview(groups, empty, note); } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message)); }
-        }
-        next();
+        });
+    }
+    function finishAll() {
+        var st = batchState; if (!st || batching) return;
+        batchState = null; batchGroup = null;
+        restoreGroup();
+        var a = loadProfiles();
+        applySettings(a.list[a.active].settings);
+        $('#massScavengeFinal').remove();
+        startOriginal();
+        var ok = st.done.filter(function (x) { return !x.failed; }).length, open = st.todo.length - st.i;
+        var note = '<b>Alle Profile:</b> ' + ok + ' berechnet' +
+            (open ? ' · ' + open + ' nicht berechnet: ' + esc(st.todo.slice(st.i).join(', ')) : '') +
+            (st.dup ? ' · ' + st.dup + ' Züge übersprungen (Dorf schon in früherem Profil)' : '') +
+            (st.sameGroup.length ? '<br>Übersprungen, gleiche Dorfgruppe: ' + esc(st.sameGroup.join(', ')) : '') +
+            (st.failed.length ? ' · <span style="color:#a00">fehlgeschlagen: ' + esc(st.failed.join(', ')) + '</span>' : '') +
+            (st.small ? '<br>' + smallNote(st.small) : '');
+        Object.keys(st.seen).forEach(function (v) { delete st.empty[v]; });
+        try { buildPreview(st.groups, st.empty, note); } catch (e) { box('<b>Vorschau-Fehler:</b> ' + esc(e.message)); }
     }
 
     /* ================= Übersicht & Statistik =================
@@ -1210,7 +1266,7 @@ var premiumBtnEnabled = false;
     function addUi() {
         var so = $('#massScavengeSophie');
         addMaxInputs();
-        if (batching) { so.css('display', 'none'); return; }
+        if (batching) { $('[id=massScavengeSophie]').css('display', 'none'); return; }
         if (so.length && !so.attr('data-ms-ui') && origOk()) {
             so.attr('data-ms-ui', '1').css('display', 'none');
             buildNewUi();

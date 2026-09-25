@@ -31,7 +31,7 @@ var premiumBtnEnabled = false;
     }
     var batching = false, batchGroup = null, vilMap = {}, sendList = [];
     var SETTING_KEYS = ['troopTypeEnabled', 'keepHome', 'categoryEnabled', 'prioritiseHighCat',
-                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY];
+                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY, 'msTimeMode', 'msDaily'];
 
     /* ---------- Hilfsfunktionen ---------- */
     function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -57,7 +57,7 @@ var premiumBtnEnabled = false;
         return s;
     }
     function applySettings(s) {
-        SETTING_KEYS.forEach(function (k) { if (s && s[k] != null) lsSet(k, s[k]); else if (k === MAX_KEY) lsDel(k); });
+        SETTING_KEYS.forEach(function (k) { if (s && s[k] != null) lsSet(k, s[k]); else if (k === MAX_KEY || k === 'msTimeMode') lsDel(k); });
     }
     function storeActive() {
         if (batching) return;
@@ -73,10 +73,23 @@ var premiumBtnEnabled = false;
     if (!window.__msGroupHook) {
         window.__msGroupHook = true;
         $.ajaxPrefilter(function (opt) {
-            if (opt.url && /mode=scavenge_mass/.test(opt.url) && !/[?&]group=/.test(opt.url)) {
-                opt.url += '&group=' + encodeURIComponent(activeGroup());
+            if (opt.url && /mode=scavenge_mass/.test(opt.url)) {
+                if (!/[?&]group=/.test(opt.url)) opt.url += '&group=' + encodeURIComponent(activeGroup());
+                var m = opt.url.match(/[?&]group=([^&]*)/);
+                if (m) window.__msLastGroup = decodeURIComponent(m[1]);
             }
         });
+    }
+    /* Gruppe, die im Spiel vor dem Skript ausgewählt war – danach wird dorthin zurückgewechselt */
+    if (window.__msOrigGroup == null && typeof game_data !== 'undefined' && game_data.group_id != null) window.__msOrigGroup = String(game_data.group_id);
+    function restoreGroup() {
+        var orig = window.__msOrigGroup != null ? window.__msOrigGroup : lsGet('msDefaultGroup');
+        if (orig == null || window.__msLastGroup == null || String(window.__msLastGroup) === String(orig)) return;
+        setTimeout(function () {
+            var base = 'game.php?screen=place&mode=scavenge_mass';
+            if (game_data.player && game_data.player.sitter > 0) base = 'game.php?t=' + game_data.player.id + '&screen=place&mode=scavenge_mass';
+            $.get(base + '&group=' + encodeURIComponent(orig) + '&page=0');
+        }, 250);
     }
 
     var groupCache = null;
@@ -114,6 +127,27 @@ var premiumBtnEnabled = false;
     }
 
     /* ---------- Hooks ins Original (nach jedem Laden neu setzen) ---------- */
+    /* ---------- Rückkehr "täglich um": nächste Uhrzeit (heute oder morgen) ---------- */
+    function loadDaily() { try { return JSON.parse(lsGet('msDaily')) || { off: '08:00', def: '08:00' }; } catch (e) { return { off: '08:00', def: '08:00' }; } }
+    function nextOccurrence(hhmm) {
+        var m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); if (!m) return null;
+        var now = new Date(nowMs()), d = new Date(now.getTime());
+        d.setHours(+m[1], +m[2], 0, 0);
+        if (d.getTime() <= now.getTime() + 60000) d.setDate(d.getDate() + 1); /* schon vorbei -> morgen */
+        return d;
+    }
+    function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+    function hm(d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+    /* Vor jeder Berechnung: im Modus "täglich" Datum/Uhrzeit im Original auf den nächsten Termin setzen */
+    function applyDaily() {
+        if (lsGet('msTimeMode') !== 'daily') return;
+        var dl = loadDaily(), o = nextOccurrence(dl.off), d = nextOccurrence(dl.def);
+        if (!o || !d) return;
+        var set = function (id, v) { var e = document.getElementById(id); if (e) { e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); } };
+        var r = document.getElementById('timeSelectorDate');
+        if (r) { r.checked = true; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); }
+        set('offDay', ymd(o)); set('offTime', hm(o)); set('defDay', ymd(d)); set('defTime', hm(d));
+    }
     function installHooks() {
         if (typeof window.calculateHaulCategories !== 'function' || typeof window.readyToSend !== 'function') {
             UI.ErrorMessage('Erweiterung: Original geändert, deaktiviert.');
@@ -148,6 +182,7 @@ var premiumBtnEnabled = false;
         var origReady = window.readyToSend;
         window.readyToSend = function () {
             if (!batching) runInfo = {};
+            applyDaily();
             /* Das Original entfernt beim Berechnen sein Einstellungsfenster (getData). Damit "Berechnen"
                mehrfach funktioniert, wird es kurz umbenannt und danach zurückbenannt. Altes Launch-Fenster weg. */
             $('#massScavengeFinal').remove();
@@ -635,6 +670,7 @@ var premiumBtnEnabled = false;
         }
         function finish() {
             batching = false; batchGroup = null;
+            restoreGroup();
             var a = loadProfiles();
             applySettings(a.list[a.active].settings);
             $('#massScavengeFinal').remove();
@@ -687,9 +723,13 @@ var premiumBtnEnabled = false;
         box('Lade Raubzüge …', title);
         var base = 'game.php?screen=place&mode=scavenge_mass', all = [], pages = 1, p = 0, last = 0;
         if (game_data.player && game_data.player.sitter > 0) base = 'game.php?t=' + game_data.player.id + '&screen=place&mode=scavenge_mass';
+        /* Übersicht/Statistik zeigen immer alle Dörfer (Gruppe "alle"), unabhängig von der Profil-Gruppe */
+        base += '&group=' + encodeURIComponent(lsGet('msDefaultGroup') || '0');
+        window.__msLastGroup = lsGet('msDefaultGroup') || '0';
         (function next() {
             if (p >= pages) {
                 if (onlyCurrent()) all = all.filter(function (v) { return String(v.village_id) === String(game_data.village && game_data.village.id); });
+                restoreGroup();
                 if (!all.length) return box('Keine Dörfer gefunden.', title);
                 return render(all);
             }
@@ -765,8 +805,21 @@ var premiumBtnEnabled = false;
         injectOvStyle();
         var sm = isSmall(), free = 0, running = 0;
         if (sm) { var cards = ''; }
+        function vLoot(v) {
+            var t = { wood: 0, stone: 0, iron: 0, est: false };
+            [1, 2, 3, 4].forEach(function (k) {
+                var o = v.options && v.options[k];
+                if (!o || o.is_locked || !o.scavenging_squad) return;
+                var l = squadLoot(o.scavenging_squad, k, v.unit_carry_factor);
+                if (l) { t.wood += l.wood; t.stone += l.stone; t.iron += l.iron; if (l.est) t.est = true; }
+            });
+            return t;
+        }
+        var anyEst = false;
         var rows = list.map(function (v, idx) {
-            var lr = lastReturn(v);
+            var lr = lastReturn(v), lt = vLoot(v);
+            if (lt.est) anyEst = true;
+            var lootTxt = (lt.wood + lt.stone + lt.iron) ? img('holz.png', 'Holz') + ' ' + fmt(lt.wood) + ' ' + img('lehm.png', 'Lehm') + ' ' + fmt(lt.stone) + ' ' + img('eisen.png', 'Eisen') + ' ' + fmt(lt.iron) : '';
             if (sm) {
                 cards += '<div class="ms-vc"><div class="ms-vc-h">' + vLink(v, true) +
                     '<span class="ms-badge ms-last" data-last="' + lr + '">' + (lr ? '⏎ ' + fmtDate(lr * 1000, true) : '–') + '</span></div><div class="ms-vc-g">' +
@@ -778,7 +831,7 @@ var premiumBtnEnabled = false;
                         running++;
                         var rt = +(sq.return_time || 0);
                         return '<div>' + st + (rt ? '<span class="ms-cd" data-rt="' + rt + '"></span>' : 'läuft') + '</div>';
-                    }).join('') + '</div></div>';
+                    }).join('') + '</div>' + (lootTxt ? '<div style="margin-top:4px;font-size:12px">Beute: ' + lootTxt + '</div>' : '') + '</div>';
                 return '';
             }
             var cells = [1, 2, 3, 4].map(function (k) {
@@ -791,14 +844,16 @@ var premiumBtnEnabled = false;
                 return rt ? '<td class="r ms-cd" data-rt="' + rt + '" title="zurück ' + fmtDate(rt * 1000) + '"></td>' : '<td class="r">läuft</td>';
             }).join('');
             return '<tr class="v' + (idx & 1) + '"><td>' + vLink(v, sm) + '</td>' +
-                '<td class="r ms-last" data-last="' + lr + '">' + (lr ? fmtDate(lr * 1000, sm) : '–') + '</td>' + cells + '</tr>';
+                '<td class="r ms-last" data-last="' + lr + '">' + (lr ? fmtDate(lr * 1000, sm) : '–') + '</td>' + cells +
+                '<td class="r">' + (lt.wood ? fmt(lt.wood) : '–') + '</td><td class="r">' + (lt.stone ? fmt(lt.stone) : '–') + '</td><td class="r">' + (lt.iron ? fmt(lt.iron) : '–') + '</td></tr>';
         }).join('');
         var html =
             (sm ? cards :
             '<table class="ms-tab"><tr><th>Dorf</th><th class="r">Letzte Rückkehr</th>' +
             [1, 2, 3, 4].map(function (k) { return '<th class="r"><span class="ms-st">' + k + '</span><span class="ms-sn"> ' + STAGE_NAMES[k] + '</span></th>'; }).join('') +
+            '<th class="r">' + img('holz.png', 'Holz') + '</th><th class="r">' + img('lehm.png', 'Lehm') + '</th><th class="r">' + img('eisen.png', 'Eisen') + '</th>' +
             '</tr>' + rows + '</table>');
-        box(html, 'Raubzug-Übersicht', '<small>' + (sm ? '⏎ = letzte Rückkehr · ' : 'Restzeit läuft live mit · ') + '🔒 nicht freigeschaltet · <span style="' + GREEN + ';padding:0 4px">zuerst</span> <span style="' + RED + ';padding:0 4px">zuletzt</span></small>');
+        box(html, 'Raubzug-Übersicht', '<small>' + (sm ? '⏎ = letzte Rückkehr · ' : 'Restzeit läuft live mit · ') + (anyEst ? 'Beute geschätzt · ' : '') + '🔒 nicht freigeschaltet · <span style="' + GREEN + ';padding:0 4px">zuerst</span> <span style="' + RED + ';padding:0 4px">zuletzt</span></small>');
         markFirstLast('#msPreviewBox .ms-last');
         function tick() {
             var cds = document.querySelectorAll('#msPreviewBox .ms-cd');
@@ -930,7 +985,7 @@ var premiumBtnEnabled = false;
         if (!fin.length || fin.attr('data-ms')) return;
         /* Das Launch-Fenster des Originals wird nicht mehr gebraucht - die Vorschau ersetzt es */
         fin.attr('data-ms', '1').css('display', 'none');
-        if (!batching) setTimeout(showPreview, 0);
+        if (!batching) { setTimeout(showPreview, 0); restoreGroup(); }
     }
 
     /* ================= Neues Einstellungsfenster =================
@@ -1030,7 +1085,8 @@ var premiumBtnEnabled = false;
             var on = $('#category' + k).is(':checked');
             return '<label class="ms-stage' + (on ? ' on' : '') + '"><input type="checkbox" class="ms-cat" data-k="' + k + '"' + (on ? ' checked' : '') + '><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</label>';
         }).join('');
-        var dateMode = $('#timeSelectorDate').is(':checked');
+        var tMode = lsGet('msTimeMode') === 'daily' ? 'daily' : ($('#timeSelectorDate').is(':checked') ? 'd' : 'h'), dly = loadDaily();
+        var dateMode = tMode === 'd';
         var bal = !$('#settingPriorityPriority').is(':checked');
         var p = loadProfiles();
         var html =
@@ -1044,11 +1100,14 @@ var premiumBtnEnabled = false;
             '<div class="ms-col">' +
             '<div class="ms-card"><h4>Stufen</h4><div class="ms-in ms-stages">' + stages + '</div></div>' +
             '<div class="ms-card"><h4>Rückkehr</h4><div class="ms-in">' +
-            '<div class="ms-seg"><span data-m="h" class="' + (dateMode ? '' : 'a') + '">Laufzeit (Std.)</span><span data-m="d" class="' + (dateMode ? 'a' : '') + '">Uhrzeit</span></div>' +
-            '<div class="ms-rt ms-rt-h"' + (dateMode ? ' style="display:none"' : '') + '>' +
+            '<div class="ms-seg"><span data-m="h" class="' + (tMode === 'h' ? 'a' : '') + '">Laufzeit (Std.)</span><span data-m="d" class="' + (tMode === 'd' ? 'a' : '') + '">Datum + Uhrzeit</span><span data-m="daily" class="' + (tMode === 'daily' ? 'a' : '') + '" title="Immer zur nächsten Uhrzeit – ist sie vorbei, zählt der nächste Tag">Täglich um</span></div>' +
+            '<div class="ms-rt ms-rt-h"' + (tMode === 'h' ? '' : ' style="display:none"') + '>' +
             '<b>Off-Dörfer</b><input type="text" class="ms-h-off" style="width:70px" value="' + esc($('.runTime_off').val() || '') + '"><span class="ms-hint ms-hh-off"></span>' +
             '<b>Deff-Dörfer</b><input type="text" class="ms-h-def" style="width:70px" value="' + esc($('.runTime_def').val() || '') + '"><span class="ms-hint ms-hh-def"></span></div>' +
-            '<div class="ms-rt ms-rt-d"' + (dateMode ? '' : ' style="display:none"') + '>' +
+            '<div class="ms-rt ms-rt-t"' + (tMode === 'daily' ? '' : ' style="display:none"') + '>' +
+            '<b>Off-Dörfer</b><input type="time" class="ms-t-off" value="' + esc(dly.off) + '"><span class="ms-hint ms-th-off"></span>' +
+            '<b>Deff-Dörfer</b><input type="time" class="ms-t-def" value="' + esc(dly.def) + '"><span class="ms-hint ms-th-def"></span></div>' +
+            '<div class="ms-rt ms-rt-d"' + (tMode === 'd' ? '' : ' style="display:none"') + '>' +
             '<b>Off-Dörfer</b><span><input type="date" class="ms-d-offDay" value="' + esc($('#offDay').val() || '') + '"> <input type="time" class="ms-d-offTime" value="' + esc($('#offTime').val() || '') + '"></span><span></span>' +
             '<b>Deff-Dörfer</b><span><input type="date" class="ms-d-defDay" value="' + esc($('#defDay').val() || '') + '"> <input type="time" class="ms-d-defTime" value="' + esc($('#defTime').val() || '') + '"></span><span></span></div>' +
             '</div></div>' +
@@ -1104,12 +1163,21 @@ var premiumBtnEnabled = false;
         /* --- Rückkehr --- */
         function hh() { ui.find('.ms-hh-off').text(hoursHint(ui.find('.ms-h-off').val())); ui.find('.ms-hh-def').text(hoursHint(ui.find('.ms-h-def').val())); }
         hh();
+        function th() {
+            ['off', 'def'].forEach(function (x) { var n = nextOccurrence(ui.find('.ms-t-' + x).val()); ui.find('.ms-th-' + x).text(n ? 'nächste: ' + fmtDate(n.getTime(), true) : ''); });
+        }
+        th();
         ui.find('.ms-seg span').on('click', function () {
-            var d = $(this).attr('data-m') === 'd';
+            var m = $(this).attr('data-m'), d = m !== 'h';
             ui.find('.ms-seg span').removeClass('a'); $(this).addClass('a');
-            ui.find('.ms-rt-h').toggle(!d); ui.find('.ms-rt-d').toggle(d);
+            ui.find('.ms-rt-h').toggle(m === 'h'); ui.find('.ms-rt-d').toggle(m === 'd'); ui.find('.ms-rt-t').toggle(m === 'daily');
+            lsSet('msTimeMode', m === 'daily' ? 'daily' : ''); storeActive();
             var r = document.getElementById(d ? 'timeSelectorDate' : 'timeSelectorHours');
             if (r) { r.checked = true; fire(r); fire(r, 'change'); }
+            th();
+        });
+        ui.find('.ms-t-off, .ms-t-def').on('input change', function () {
+            lsSet('msDaily', JSON.stringify({ off: ui.find('.ms-t-off').val(), def: ui.find('.ms-t-def').val() })); storeActive(); th();
         });
         ui.find('.ms-h-off').on('input', function () { var o = $('.runTime_off')[0]; o.value = this.value; fire(o); hh(); });
         ui.find('.ms-h-def').on('input', function () { var o = $('.runTime_def')[0]; o.value = this.value; fire(o); hh(); });

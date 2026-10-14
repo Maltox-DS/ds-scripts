@@ -54,6 +54,44 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
   nächste freie Stufe, erste/letzte Rückkehr, Beute je Stufe und eine Rangliste der Dörfer nach Beute/h.
 - **Mindestens 10 Einheiten** – Züge mit weniger als 10 Einheiten werden entfernt.
 
+## Rohstoffe anfordern by Maltox
+
+Fordert Rohstoffe für einen Ausbau, Münzen oder AGs aus mehreren eigenen Dörfern an.
+Das Skript rechnet nur und trägt die Mengen auf der Marktplatz-Seite „Anfordern“ ein –
+abgeschickt wird mit dem Spiel-Button „Anfordern“ per eigenem Klick. Benötigt Premium.
+
+### Einbinden (Schnellleiste → Ziel-URL)
+
+```
+javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordern.js');void 0;
+```
+
+### Ablauf
+
+1. **Im Hauptgebäude starten** – Bedarf zusammenstellen und Lieferdörfer anhaken, dann „Im Marktplatz eintragen“.
+2. **Auf der Seite „Anfordern“ erneut starten** – die Mengen werden eingetragen und grün markiert.
+3. **Selbst auf „Anfordern“ klicken.**
+
+### Funktionen
+
+- **Bedarf aus mehreren Posten** – nächste Gebäudestufe (Kosten aus dem Hauptgebäude), Münzen
+  (Kosten aus der Weltkonfiguration), AG-Einheitenkosten und freie Mengen, beliebig kombinierbar.
+- **Abzüge** – vorhandene Rohstoffe im Dorf (abschaltbar) und „bereits unterwegs“ (manuell).
+- **Speicher-Check** – warnt und kürzt, wenn der Speicher die angeforderte Menge nicht fasst.
+- **Lieferdörfer** – alle Dörfer nach Entfernung sortiert mit Rohstoffen und freien Händlern;
+  Auswahl per Haken, „Nächste 5“ oder „Keine“. Die Auswahl wird gespeichert.
+- **Verteilung** – nächste Dörfer zuerst, mit Mindestreserve je Rohstoff im Lieferdorf und
+  begrenzt durch die freien Händler (Kapazität je Händler einstellbar, Standard 1.000).
+  Was nicht gedeckt werden kann, wird rot als „Fehlt noch“ angezeigt.
+- **Schutz vor Doppelanforderung** – ein schon eingetragener Plan wird nur nach Rückfrage erneut
+  eingetragen; Pläne älter als 30 Minuten werden gemeldet. „Plan verwerfen“ löscht den Plan.
+
+### Bekannte Grenzen
+
+- AG: nur die Einheitenkosten (40.000 / 50.000 / 50.000) – Münzen separat hinzufügen.
+- „Bereits unterwegs“ wird noch nicht automatisch erkannt.
+- Erste Version, die Erkennung der Felder auf der Seite „Anfordern“ ist noch nicht im Spiel getestet.
+
 ## Alte Datei
 
 `massScavenge_AlleProfile.js` ist der frühere Name und wird nicht mehr aktualisiert.
@@ -61,4 +99,4 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
 ## Hinweis
 
 Nicht von InnoGames freigegeben. Es wird nichts automatisch abgeschickt oder wiederholt –
-jede Gruppe wird per Klick gesendet. Nutzung auf eigenes Risiko.
+jede Gruppe bzw. Anforderung wird per Klick gesendet. Nutzung auf eigenes Risiko.

@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.5)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.6)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -153,12 +153,25 @@
       '#buildings .ra-plus:hover{background:#a06a1a}',
       '.ra-link{display:inline-flex;align-items:center;gap:5px;font-weight:bold;cursor:pointer}',
       '.ra-link img{width:16px;height:16px}',
-      '#ra_snobbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:6px 0;padding:6px 10px;',
-      ' background:#f4e4bc;border:1px solid #c1a264;border-radius:3px}',
-      '#ra_snobbar b{color:#603000}',
-      '#ra_snobbar .ra-g{display:inline-flex;align-items:center;gap:5px}',
-      '#ra_snobbar input{width:42px;text-align:center}',
-      '#ra_snobbar .ra-hint{color:#7a6540;font-size:11px}',
+      '#ra_snobbar{margin:8px 0 12px;border:1px solid #7d510f;border-radius:4px;background:#f4e4bc;overflow:hidden;max-width:640px}',
+      '#ra_snobbar .ra-sb-head{display:flex;justify-content:space-between;align-items:center;padding:5px 10px;background:linear-gradient(#e8d29d,#cfb070);font-weight:bold;color:#3b2604}',
+      '#ra_snobbar .ra-sb-head img{width:16px;height:16px;vertical-align:-3px;margin-right:4px}',
+      '#ra_snobbar .ra-free{font-weight:normal;font-size:11px}',
+      '#ra_snobbar .ra-sb-body{display:flex;gap:10px;padding:10px;flex-wrap:wrap}',
+      '#ra_snobbar .ra-sc{flex:1 1 260px;background:#fff5da;border:1px solid #c1a264;border-radius:4px;padding:8px 10px;display:flex;flex-direction:column;gap:8px}',
+      '#ra_snobbar .ra-sc-t{display:flex;align-items:center;gap:6px;font-size:13px}',
+      '#ra_snobbar .ra-sc-t img{width:18px;height:18px}',
+      '#ra_snobbar .ra-badge{margin-left:auto;font-size:10px;padding:1px 6px;border-radius:8px;background:#ead19b;color:#5b3d07}',
+      '#ra_snobbar .ra-badge.ok{background:#d9ecc4;color:#2e5d12}',
+      '#ra_snobbar .ra-sc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
+      '#ra_snobbar .ra-step{display:inline-flex;border:1px solid #c1a264;border-radius:3px;overflow:hidden;background:#fff}',
+      '#ra_snobbar .ra-step a{width:22px;text-align:center;line-height:22px;background:#e8d29d;color:#3b2604;font-weight:bold;text-decoration:none}',
+      '#ra_snobbar .ra-step a:hover{background:#dcc07f}',
+      '#ra_snobbar .ra-step input{width:44px;border:0;text-align:center;font-weight:bold;-moz-appearance:textfield}',
+      '#ra_snobbar .ra-step input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}',
+      '#ra_snobbar .ra-sc-cost{display:flex;gap:8px;color:#5b4520;font-size:11px;white-space:nowrap}',
+      '#ra_snobbar .ra-sc-foot{text-align:right}',
+      '#ra_snobbar .ra-sb-note{padding:0 10px 8px;color:#7a6540;font-size:10px}',
       '#ra{width:620px;max-width:92vw;font-size:12px;color:#2b1c05}',
       '#ra .ra-top{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px}',
       '#ra .ra-top h3{margin:0;font-size:15px}',
@@ -298,21 +311,46 @@
       if ($('#ra_snobbar').length) return;
       c = c || { cost: COIN_FALLBACK, isCoin: true };
       var need = c.isCoin ? detectCoins() : null;
-      var coinVal = need != null && need > 0 ? need : 1;
-      var hint = need == null ? '' : (need > 0 ? '<span class="ra-hint">fehlen fürs nächste AG</span>' : '<span class="ra-hint">genug Münzen fürs nächste AG</span>');
-      var html = '<div id="ra_snobbar"><b>' + marketImg() + ' Rohstoffe anfordern</b>' +
-        (c.isCoin ? '<span class="ra-g"><input id="ra_coinN" type="number" min="1" value="' + coinVal + '"> Münzen ' + hint + ' <a href="#" class="btn" data-k="coin">Anfordern</a></span>' : '') +
-        '<span class="ra-g"><input id="ra_snobN" type="number" min="1" value="1"> AG <a href="#" class="btn" data-k="snob">Anfordern</a></span>' +
-        '<span class="ra-g"><a href="#" class="btn" data-k="free">Freie Menge</a></span></div>';
+      var base = w.image_base || '/graphic/';
+      function card(k, title, img, val, hint) {
+        return '<div class="ra-sc" data-k="' + k + '">' +
+          '<div class="ra-sc-t">' + img + '<b>' + title + '</b>' + (hint || '') + '</div>' +
+          '<div class="ra-sc-row"><span class="ra-step"><a href="#" class="ra-dec">−</a><input type="number" min="1" value="' + val + '"><a href="#" class="ra-inc">+</a></span>' +
+          '<span class="ra-sc-cost"></span></div>' +
+          '<div class="ra-sc-foot"><a href="#" class="btn ra-go">Rohstoffe anfordern</a></div></div>';
+      }
+      var coinHint = need == null ? '' : need > 0
+        ? '<span class="ra-badge">' + need + ' fehlen fürs nächste AG</span>'
+        : '<span class="ra-badge ok">genug fürs nächste AG</span>';
+      var html = '<div id="ra_snobbar">' +
+        '<div class="ra-sb-head"><span>' + marketImg() + ' Rohstoffe anfordern</span><a href="#" class="ra-free">+ freie Menge</a></div>' +
+        '<div class="ra-sb-body">' +
+          (c.isCoin ? card('coin', 'Münzen', '', need != null && need > 0 ? need : 1, coinHint) : '') +
+          card('snob', 'Adelsgeschlechter', '<img src="' + base + 'unit/unit_snob.png" alt="" onerror="this.remove()">', 1, '') +
+        '</div>' +
+        '<div class="ra-sb-note">Bei mehr als in den Speicher passt, wird gleichmäßig geliefert – passend zur automatischen Prägung.</div>' +
+      '</div>';
       var $t = $('#content_value').length ? $('#content_value') : $('#contentContainer');
       $t.prepend(html);
-      $('#ra_snobbar').on('click', 'a.btn', function (ev) {
+      var unitOf = { coin: c.cost, snob: SNOB_COST };
+      function refresh($card) {
+        var k = $card.data('k'), n = Math.max(1, num($card.find('input').val())), tot = mul(unitOf[k], n);
+        $card.find('.ra-sc-cost').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(tot[r]) + '</span>'; }).join(''));
+      }
+      var $bar = $('#ra_snobbar');
+      $bar.find('.ra-sc').each(function () { refresh($(this)); });
+      $bar.on('input change', 'input', function () { refresh($(this).closest('.ra-sc')); });
+      $bar.on('click', '.ra-dec, .ra-inc', function (ev) {
         ev.preventDefault();
-        var k = $(this).data('k'), n;
-        if (k === 'coin') { n = Math.max(1, num($('#ra_coinN').val())); openRequest([setItem('coin', c.cost, n)]); }
-        else if (k === 'snob') { n = Math.max(1, num($('#ra_snobN').val())); openRequest([setItem('snob', SNOB_COST, n)]); }
-        else openRequest([]);
+        var $i = $(this).siblings('input'), v = Math.max(1, num($i.val()) + ($(this).hasClass('ra-inc') ? 1 : -1));
+        $i.val(v); refresh($(this).closest('.ra-sc'));
       });
+      $bar.on('click', '.ra-go', function (ev) {
+        ev.preventDefault();
+        var $card = $(this).closest('.ra-sc'), k = $card.data('k'), n = Math.max(1, num($card.find('input').val()));
+        openRequest([setItem(k, unitOf[k], n)]);
+      });
+      $bar.on('click', '.ra-free', function (ev) { ev.preventDefault(); openRequest([]); });
     });
   }
   function mul(c, n) { return { wood: c.wood * n, stone: c.stone * n, iron: c.iron * n }; }

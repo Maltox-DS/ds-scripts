@@ -61,11 +61,15 @@ im Stil von „Request resources to HQ“ (Shinko to Kuma), aber mit mehreren Li
 
 ### Tampermonkey (empfohlen)
 
-Installieren: in Tampermonkey öffnen bzw. „Aus URL installieren“:
+Einmal installieren: in Tampermonkey „Aus URL installieren“:
 
 ```
 https://raw.githubusercontent.com/Maltox-DS/ds-scripts/main/rohstoffeAnfordern.user.js
 ```
+
+Das ist nur ein kleiner Loader. Der eigentliche Code steht in `rohstoffeAnfordernButtons.js` und wird bei jedem
+Aufruf von Hauptgebäude oder Adelshof über jsDelivr geladen – Updates im Repo kommen also ohne Neuinstallation an
+(nach dem Upload jsDelivr-Cache leeren). Zum Testen eines bestimmten Stands im Loader `REF = 'main'` durch einen Commit-Hash ersetzen.
 
 Danach gibt es dauerhaft Buttons:
 
@@ -83,7 +87,7 @@ Ein Klick öffnet das Anforderungsfenster:
 4. **Anfordern** – pro Lieferdorf ein Klick („Anfordern“ in der Zeile oder „Nächstes anfordern“).
    Nach der ersten Anforderung ist der Plan gesperrt, damit nichts doppelt angefordert wird.
 
-Reserve und Händlerkapazität werden gespeichert. Für Diagnose-Ausgaben in der Konsole im Skript `DEBUG = true` setzen.
+Reserve und Händlerkapazität werden gespeichert. Für Diagnose-Ausgaben in der Konsole in `rohstoffeAnfordernButtons.js` `DEBUG = true` setzen.
 
 ### Schnellleisten-Version (alt)
 

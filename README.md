@@ -56,47 +56,50 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
 
 ## Rohstoffe anfordern by Maltox
 
-Fordert Rohstoffe für einen Ausbau, Münzen oder AGs aus mehreren eigenen Dörfern an.
-Das Skript rechnet nur und trägt die Mengen auf der Marktplatz-Seite „Anfordern“ ein –
-abgeschickt wird mit dem Spiel-Button „Anfordern“ per eigenem Klick. Benötigt Premium.
+Fordert Rohstoffe für einen Ausbau, Münzen oder AGs aus mehreren eigenen Dörfern an –
+im Stil von „Request resources to HQ“ (Shinko to Kuma), aber mit mehreren Lieferdörfern. Benötigt Premium.
 
-### Einbinden (Schnellleiste → Ziel-URL)
+### Tampermonkey (empfohlen)
+
+Installieren: in Tampermonkey öffnen bzw. „Aus URL installieren“:
+
+```
+https://raw.githubusercontent.com/Maltox-DS/ds-scripts/main/rohstoffeAnfordern.user.js
+```
+
+Danach gibt es dauerhaft Buttons:
+
+- **Hauptgebäude** – „Anfordern“ neben jedem Gebäude (Kosten der nächsten Stufe) und oben „Rohstoffe anfordern (freie Menge)“.
+- **Adelshof** – Leiste mit „Münze(n)“, „AG“ (Anzahl einstellbar) und „Freie Menge“.
+
+Ein Klick öffnet das Anforderungsfenster:
+
+1. **Bedarf** – Kosten minus vorhandene Rohstoffe (abschaltbar) minus eingehende Rohstoffe
+   (werden automatisch von der Seite „Anfordern“ gelesen, von Hand änderbar). Weitere freie Mengen können ergänzt werden.
+2. **Lieferdörfer** – nach Entfernung sortiert, mit Rohstoffen und freien Händlern. „Automatisch wählen“ hakt die
+   nächsten Dörfer mit freien Händlern an, bis der Bedarf gedeckt ist; von Hand änderbar.
+3. **Verteilung** – nächste Dörfer zuerst, mit Reserve je Rohstoff und begrenzt durch die freien Händler.
+   Was nicht gedeckt werden kann, steht rot unter „Fehlt noch“.
+4. **Anfordern** – pro Lieferdorf ein Klick („Anfordern“ in der Zeile oder „Nächstes anfordern“).
+   Nach der ersten Anforderung ist der Plan gesperrt, damit nichts doppelt angefordert wird.
+
+Reserve und Händlerkapazität werden gespeichert. Für Diagnose-Ausgaben in der Konsole im Skript `DEBUG = true` setzen.
+
+### Schnellleisten-Version (alt)
+
+Rechnet im Hauptgebäude und trägt die Mengen auf der Seite „Anfordern“ nur ein – abgeschickt wird mit dem Spiel-Button.
 
 ```
 javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordern.js');void 0;
-```
-
-Testversion mit Diagnose-Ausgaben in der Browser-Konsole (F12), gleiche Funktionen:
-
-```
 javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernTest.js');void 0;
 ```
 
-### Ablauf
-
-1. **Im Hauptgebäude starten** – Bedarf zusammenstellen und Lieferdörfer anhaken, dann „Im Marktplatz eintragen“.
-2. **Auf der Seite „Anfordern“ erneut starten** – die Mengen werden eingetragen und grün markiert.
-3. **Selbst auf „Anfordern“ klicken.**
-
-### Funktionen
-
-- **Bedarf aus mehreren Posten** – nächste Gebäudestufe (Kosten aus dem Hauptgebäude), Münzen
-  (Kosten aus der Weltkonfiguration), AG-Einheitenkosten und freie Mengen, beliebig kombinierbar.
-- **Abzüge** – vorhandene Rohstoffe im Dorf (abschaltbar) und „bereits unterwegs“ (manuell).
-- **Speicher-Check** – warnt und kürzt, wenn der Speicher die angeforderte Menge nicht fasst.
-- **Lieferdörfer** – alle Dörfer nach Entfernung sortiert mit Rohstoffen und freien Händlern;
-  Auswahl per Haken, „Nächste 5“ oder „Keine“. Die Auswahl wird gespeichert.
-- **Verteilung** – nächste Dörfer zuerst, mit Mindestreserve je Rohstoff im Lieferdorf und
-  begrenzt durch die freien Händler (Kapazität je Händler einstellbar, Standard 1.000).
-  Was nicht gedeckt werden kann, wird rot als „Fehlt noch“ angezeigt.
-- **Schutz vor Doppelanforderung** – ein schon eingetragener Plan wird nur nach Rückfrage erneut
-  eingetragen; Pläne älter als 30 Minuten werden gemeldet. „Plan verwerfen“ löscht den Plan.
+Die zweite Zeile ist die Testversion mit Diagnose-Ausgaben in der Konsole (F12).
 
 ### Bekannte Grenzen
 
-- AG: nur die Einheitenkosten (40.000 / 50.000 / 50.000) – Münzen separat hinzufügen.
-- „Bereits unterwegs“ wird noch nicht automatisch erkannt.
-- Frühe Version: bei Problemen die Testversion nutzen und die Konsolen-Ausgabe schicken.
+- AG: nur die Einheitenkosten (40.000 / 50.000 / 50.000) – Münzen separat anfordern.
+- Tampermonkey-Skripte können nicht in die Skriptbibliothek aufgenommen werden.
 
 ## Alte Datei
 

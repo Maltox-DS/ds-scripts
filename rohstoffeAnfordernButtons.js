@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.3)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.5)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -33,6 +33,7 @@
   function load(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* egal */ } }
   function num(t) { var n = parseInt(String(t == null ? '' : t).replace(/[^\d]/g, ''), 10); return isNaN(n) ? 0 : n; }
+  function dez(x) { return (Math.round(x * 100) / 100).toLocaleString('de-DE', { maximumFractionDigits: 2 }); }
   function fmt(n) { return Number(n || 0).toLocaleString('de-DE'); }
   function icon(r) { return '<span class="icon header ' + r + '"></span>'; }
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -147,6 +148,9 @@
       '#buildings .ra-col{text-align:center;white-space:nowrap;width:1%;padding:0 6px}',
       '#buildings .ra-req{padding:3px 9px}',
       '#buildings .ra-na{color:#9c8a62;font-size:11px;cursor:default}',
+      '#buildings .ra-plus{display:inline-block;width:15px;height:15px;line-height:14px;margin-left:3px;border-radius:50%;',
+      ' background:#7d510f;color:#fff!important;font-weight:bold;font-size:13px;text-align:center;text-decoration:none!important;vertical-align:1px}',
+      '#buildings .ra-plus:hover{background:#a06a1a}',
       '.ra-link{display:inline-flex;align-items:center;gap:5px;font-weight:bold;cursor:pointer}',
       '.ra-link img{width:16px;height:16px}',
       '#ra_snobbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:6px 0;padding:6px 10px;',
@@ -169,6 +173,7 @@
       '#ra .ra-chip{display:inline-flex;align-items:center;gap:6px;padding:1px 4px 1px 8px;border:1px solid #c1a264;border-radius:10px;background:#f4e4bc}',
       '#ra .ra-chip a{color:#8b1a00;font-weight:bold;cursor:pointer;padding:0 3px;text-decoration:none}',
       '#ra .ra-chip input[type=number]{width:42px;padding:0 2px;text-align:center}',
+      '#ra .ra-info{margin:0 10px 8px;padding:5px 8px;background:#f4e4bc;border-left:3px solid #7d510f;font-size:11px}',
       '#ra details{padding:0 10px 8px}',
       '#ra summary{cursor:pointer;color:#603000}',
       '#ra .ra-grid{display:grid;grid-template-columns:auto repeat(3,auto);gap:4px 10px;align-items:center;margin-top:6px}',
@@ -218,7 +223,7 @@
       if (!$cells.length) return;
       // Kopfzeile
       if ($r.children('th').length && !$r.children('td').length) {
-        $r.append('<th class="ra-col">Anfordern</th>');
+        $r.append('<th class="ra-col">Anfordern <a href="#" class="ra-plus" title="Freie Menge anfordern">+</a></th>');
         return;
       }
       // Volle Breite (colspan über alles) → nur verbreitern
@@ -250,11 +255,7 @@
       });
       $td.append($b);
     });
-    if (!$('#ra_bar').length) {
-      var $bar = $('<div id="ra_bar" style="margin:4px 0 6px;text-align:right"><a class="ra-link" id="ra_free">' + marketImg() + 'Rohstoffe anfordern</a></div>');
-      $tbl.before($bar);
-      $bar.on('click', '#ra_free', function (ev) { ev.preventDefault(); openRequest([]); });
-    }
+    $(document).off('click.raplus').on('click.raplus', '#buildings .ra-plus', function (ev) { ev.preventDefault(); openRequest([]); });
   }
 
   // Fehlende Münzen für das nächste AG aus dem Adelshof lesen (bestmöglich, Text des Spiels)
@@ -308,13 +309,17 @@
       $('#ra_snobbar').on('click', 'a.btn', function (ev) {
         ev.preventDefault();
         var k = $(this).data('k'), n;
-        if (k === 'coin') { n = Math.max(1, num($('#ra_coinN').val())); openRequest([{ label: n + (n > 1 ? ' Münzen' : ' Münze'), cost: mul(c.cost, n) }]); }
-        else if (k === 'snob') { n = Math.max(1, num($('#ra_snobN').val())); openRequest([{ label: n + (n > 1 ? ' AGs' : ' AG'), cost: mul(SNOB_COST, n) }]); }
+        if (k === 'coin') { n = Math.max(1, num($('#ra_coinN').val())); openRequest([setItem('coin', c.cost, n)]); }
+        else if (k === 'snob') { n = Math.max(1, num($('#ra_snobN').val())); openRequest([setItem('snob', SNOB_COST, n)]); }
         else openRequest([]);
       });
     });
   }
   function mul(c, n) { return { wood: c.wood * n, stone: c.stone * n, iron: c.iron * n }; }
+  var KIND = { coin: ['Münze', 'Münzen'], snob: ['AG', 'AGs'] };
+  function setItem(kind, unit, n) {
+    return { kind: kind, unit: $.extend({}, unit), n: n, label: n + ' ' + KIND[kind][n > 1 ? 1 : 0], cost: mul(unit, n) };
+  }
 
   function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
@@ -409,10 +414,37 @@
   // =====================================================================
   // Berechnung
   // =====================================================================
+  // Paket-Modus: nur Münzen bzw. nur AGs → gleichmäßige Lieferung in ganzen Paketen
+  function setInfo(st) {
+    if (!st.items.length) return null;
+    var k = st.items[0].kind, n = 0;
+    if (!k) return null;
+    for (var i = 0; i < st.items.length; i++) { if (st.items[i].kind !== k) return null; n += st.items[i].n; }
+    return { kind: k, unit: st.items[0].unit, n: n };
+  }
+
   function computeNeed(st) {
     var sum = zero();
     st.items.forEach(function (it) { RES.forEach(function (r) { sum[r] += it.cost[r]; }); });
     var cap = num(gd.village.storage_max), need = {}, warn = [];
+    var si = setInfo(st);
+    if (si) {
+      // Gesamtmenge darf größer als der Speicher sein. Geliefert wird im exakten Verhältnis (Anteile eines Pakets),
+      // und jede Ankunft muss hineinpassen – inkl. Puffer für einen noch nicht geprägten Rest (1 Paket).
+      var u = si.unit, sets = 0, wave = Infinity;
+      RES.forEach(function (r) {
+        if (!u[r]) return;
+        var stock = num(gd.village[r]) + st.incoming[r];
+        var rest = Math.max(0, sum[r] - (cfg.deductStock ? num(gd.village[r]) : 0) - st.incoming[r]);
+        sets = Math.max(sets, rest / u[r]);
+        wave = Math.min(wave, (cap - stock) / u[r] - 1);
+      });
+      if (wave === Infinity) wave = 0;
+      wave = Math.max(0, Math.floor(wave * 100) / 100);
+      sets = Math.ceil(sets * 100) / 100;
+      if (sets > 0 && wave <= 0) warn.push('Der Speicher ist zu voll – erst prägen bzw. rekrutieren, dann anfordern.');
+      return { mode: 'sets', kind: si.kind, unit: u, sets: sets, wave: wave, sum: sum, need: ratio(u, sets), warn: warn };
+    }
     RES.forEach(function (r) {
       var stock = num(gd.village[r]);
       need[r] = Math.max(0, sum[r] - (cfg.deductStock ? stock : 0) - st.incoming[r]);
@@ -423,7 +455,7 @@
       }
       if (sum[r] > cap) warn.push(RES_DE[r] + ': Der Bedarf (' + fmt(sum[r]) + ') ist größer als dein Speicher.');
     });
-    return { sum: sum, need: need, warn: warn };
+    return { mode: 'normal', sum: sum, need: need, warn: warn };
   }
 
   function distribute(need, sources) {
@@ -445,11 +477,39 @@
     return { plan: plan, rest: rest };
   }
 
-  // Nächste Dörfer mit freien Händlern wählen, bis der Bedarf gedeckt ist
+  // Im Paket-Verhältnis verteilen; Lieferungen, die fast gleichzeitig ankommen (< 90 s), zählen zusammen
+  var SAME_ARRIVAL = 90;
+  function distributeSets(n, sources) {
+    var u = n.unit, uSum = total(u), rest = n.sets, plan = [];
+    sources.forEach(function (s) {
+      if (rest <= 0.005) return;
+      var f = rest;
+      RES.forEach(function (r) { if (u[r]) f = Math.min(f, Math.max(0, s.res[r] - cfg.reserve) / u[r]); });
+      f = Math.min(f, s.merchants * cfg.merchantCap / uSum);
+      var near = 0;
+      plan.forEach(function (p) { if (Math.abs((p.travel || 0) - (s.travel || 0)) < SAME_ARRIVAL) near += p.sets; });
+      f = Math.min(f, n.wave - near);
+      f = Math.floor(f * 1000) / 1000;
+      if (f <= 0.005) return;
+      var res = ratio(u, f);
+      if (total(res) <= 0) return;
+      rest -= f;
+      plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: res, sets: f, merchants: Math.ceil(total(res) / cfg.merchantCap), sent: false });
+    });
+    rest = Math.max(0, rest);
+    return { plan: plan, rest: ratio(u, rest), restSets: rest > 0.005 ? rest : 0 };
+  }
+
+  function ratio(u, f) { var o = {}; RES.forEach(function (r) { o[r] = Math.floor(u[r] * f); }); return o; }
+  function makePlan(n, sources) { return n.mode === 'sets' ? distributeSets(n, sources) : distribute(n.need, sources); }
+  function hasNeed(n) { return n.mode === 'sets' ? n.sets > 0 && n.wave > 0 : total(n.need) > 0; }
+
+  // Schnellste Dörfer mit freien Händlern wählen, bis der Bedarf gedeckt ist
   function autoSelect(st) {
-    var need = computeNeed(st).need, chosen = [];
+    var n = computeNeed(st), chosen = [];
+    if (!hasNeed(n)) return chosen;
     for (var i = 0; i < st.sources.length; i++) {
-      if (total(distribute(need, st.sources.filter(function (s) { return chosen.indexOf(s.id) >= 0; })).rest) <= 0) break;
+      if (total(makePlan(n, st.sources.filter(function (s) { return chosen.indexOf(s.id) >= 0; })).rest) <= 0) break;
       var s = st.sources[i];
       if (s.merchants > 0 && RES.some(function (r) { return s.res[r] > cfg.reserve; })) chosen.push(s.id);
     }
@@ -492,6 +552,7 @@
       '<div class="ra-card"><div class="ra-head">Anzufordern<a id="ra_addToggle">+ Menge</a></div>' +
         '<div class="ra-sum" id="ra_sum"></div>' +
         '<div class="ra-chips" id="ra_chips"></div>' +
+        '<div id="ra_info"></div>' +
         '<div id="ra_add" style="display:none;padding:0 10px 8px">' +
           icon('wood') + '<input id="ra_mw" ' + inp + '> ' + icon('stone') + '<input id="ra_ms" ' + inp + '> ' +
           icon('iron') + '<input id="ra_mi" ' + inp + '> <a href="#" class="btn" id="ra_addM">Hinzufügen</a></div>' +
@@ -517,12 +578,21 @@
     var n = computeNeed(st);
     if (!st.locked) {
       var srcs = st.sources.filter(function (s) { return st.sel.indexOf(s.id) >= 0; });
-      st.plan = total(n.need) > 0 && srcs.length ? distribute(n.need, srcs) : null;
+      st.plan = hasNeed(n) && srcs.length ? makePlan(n, srcs) : null;
     }
-    $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(n.need[r]) + '</span>'; }).join(''));
+    st.mode = n.mode;
+    $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(n.need[r]) + '</span>'; }).join('') +
+      (n.mode === 'sets' ? '<span class="ra-muted" style="font-size:12px;font-weight:normal;align-self:center">= ' + dez(n.sets) + ' ' + KIND[n.kind][1] + '</span>' : ''));
+    $('#ra_info').html(n.mode === 'sets' && n.sets > 0
+      ? '<div class="ra-info"><b>Gleichmäßig:</b> jede Lieferung kommt im Verhältnis ' + fmt(n.unit.wood) + ' : ' + fmt(n.unit.stone) + ' : ' + fmt(n.unit.iron) +
+        '. Was ungefähr gleichzeitig ankommt, bleibt zusammen unter <b>' + fmt(ratio(n.unit, n.wave).wood) + ' / ' + fmt(ratio(n.unit, n.wave).stone) + ' / ' + fmt(ratio(n.unit, n.wave).iron) +
+        '</b> (= ' + dez(n.wave) + ' ' + KIND[n.kind][1] + ') – so läuft der Speicher beim Prägen nicht über.</div>'
+      : '');
     $('#ra_chips').html(st.items.length
       ? st.items.map(function (it, i) {
           var bi = it.bid && st.binfo && st.binfo[it.bid];
+          if (it.kind) return '<span class="ra-chip"><input type="number" class="ra_n" data-i="' + i + '" min="1" value="' + it.n + '"' + (st.locked ? ' disabled' : '') + '> ' +
+            KIND[it.kind][it.n > 1 ? 1 : 0] + (st.locked ? '' : '<a class="ra_rm" data-i="' + i + '" title="Entfernen">×</a>') + '</span>';
           var lab = bi && it.from
             ? esc(it.name) + ' Stufe ' + it.from + ' <span class="ra-muted">bis</span> <input type="number" class="ra_to" data-i="' + i + '" min="' + it.from + '" max="' + (bi.max || 99) + '" value="' + it.to + '"' + (st.locked ? ' disabled' : '') + '>'
             : esc(it.label);
@@ -538,7 +608,9 @@
         RES.map(function (r) { return '<span><input class="ra_inc" data-r="' + r + '" ' + inp + ' value="' + st.incoming[r] + '"></span>'; }).join('')
     );
     var warn = n.warn.slice();
-    if (st.plan && total(st.plan.rest) > 0) {
+    if (st.plan && n.mode === 'sets' && st.plan.restSets > 0) {
+      warn.push('Nicht gedeckt: Rohstoffe für ' + dez(st.plan.restSets) + ' ' + KIND[n.kind][1] + ' – weitere Dörfer anhaken oder Reserve senken. Dörfer mit gleicher Ankunftszeit teilen sich die Grenze pro Ankunft.');
+    } else if (st.plan && total(st.plan.rest) > 0) {
       warn.push('Nicht gedeckt: ' + RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') + ' – weitere Dörfer anhaken oder Reserve senken.');
     }
     $('#ra_warn').html(warn.length ? '<div class="ra-warn">' + warn.map(esc).join('<br>') + '</div>' : '');
@@ -561,9 +633,10 @@
       return '<div class="' + cls + '">' +
         '<input type="checkbox" class="ra_src" value="' + s.id + '"' + (on ? ' checked' : '') + (st.locked ? ' disabled' : '') + '>' +
         '<div class="ra-name" title="' + esc(s.name) + ' – ' + s.dist.toFixed(1) + ' Felder' + (s.travelEst ? ', Laufzeit geschätzt' : '') + '">' + esc(s.name) +
-          ' <span class="ra-muted">' + (s.travelEst ? '≈' : '') + dur(s.travel) + (on ? ' · an ' + arrival(s.travel) : '') + '</span></div>' +
+          ' <span class="ra-muted">' + (s.travelEst ? '≈' : '') + dur(s.travel) + (on ? ' · an ' + arrival(s.travel) : '') +
+'</span></div>' +
         (pl ? resLine(pl.p.res, 'plan') : resLine(s.res, 'stock')) +
-        '<div class="ra-mer" title="' + (pl ? 'benötigte Händler (von ' + s.merchants + ' freien)' : 'freie Händler') + '">' + (pl ? pl.p.merchants + ' H.' : s.merchants + ' frei') + '</div>' +
+        '<div class="ra-mer" title="' + (pl ? 'benötigte Händler (von ' + s.merchants + ' freien)' + (pl.p.sets ? ' – reicht für ' + dez(pl.p.sets) + ' ' + KIND[st.items[0].kind][1] : '') : 'freie Händler') + '">' + (pl ? pl.p.merchants + ' H.' : s.merchants + ' frei') + '</div>' +
         '<div class="ra-act">' + act + '</div></div>';
     }).join('') : '<p class="ra-muted" style="padding:8px">Keine weiteren Dörfer gefunden.</p>');
     renderFoot(st);
@@ -612,6 +685,13 @@
         $('#ra_add').hide().find('input').val('');
         st.sel = autoSelect(st); update(st);
       }
+    }));
+    $d.on('change.ra', '.ra_n', guard(function () {
+      var it = st.items[num($(this).data('i'))];
+      if (!it || !it.kind) return;
+      var nn = Math.max(1, num(this.value));
+      st.items[num($(this).data('i'))] = setItem(it.kind, it.unit, nn);
+      st.sel = autoSelect(st); update(st);
     }));
     $d.on('change.ra', '.ra_to', guard(function () {
       var it = st.items[num($(this).data('i'))], bi = it && st.binfo && st.binfo[it.bid];

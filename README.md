@@ -76,7 +76,10 @@ Danach gibt es dauerhaft Buttons:
 - **Hauptgebäude** – eigene Spalte „Anfordern“: Button nur, wenn Rohstoffe fehlen (Tooltip zeigt, was fehlt),
   ✓ bei genug Rohstoffen, „zu klein“ wenn der Speicher die Stufe nicht fasst. Oben „Rohstoffe anfordern“ für freie Mengen.
 - **Adelshof** – Leiste mit „Münzen“, „AG“ und „Freie Menge“. Die fürs nächste AG fehlenden Münzen werden
-  aus dem Adelshof gelesen und vorausgefüllt (falls erkannt).
+  aus dem Adelshof gelesen und vorausgefüllt (falls erkannt). Bei Münzen und AGs darf mehr angefordert werden,
+  als in den Speicher passt (für die automatische Prägung): **gleichmäßig** – jede Lieferung kommt im exakten
+  Kostenverhältnis, und alles, was innerhalb von 90 Sekunden ankommt, bleibt zusammen unter der Speichergrenze
+  (mit Puffer für einen noch nicht geprägten Rest).
 
 Ein Klick öffnet das Anforderungsfenster:
 

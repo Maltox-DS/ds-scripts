@@ -66,6 +66,12 @@ abgeschickt wird mit dem Spiel-Button „Anfordern“ per eigenem Klick. Benöti
 javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordern.js');void 0;
 ```
 
+Testversion mit Diagnose-Ausgaben in der Browser-Konsole (F12), gleiche Funktionen:
+
+```
+javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernTest.js');void 0;
+```
+
 ### Ablauf
 
 1. **Im Hauptgebäude starten** – Bedarf zusammenstellen und Lieferdörfer anhaken, dann „Im Marktplatz eintragen“.
@@ -90,7 +96,7 @@ javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/ro
 
 - AG: nur die Einheitenkosten (40.000 / 50.000 / 50.000) – Münzen separat hinzufügen.
 - „Bereits unterwegs“ wird noch nicht automatisch erkannt.
-- Erste Version, die Erkennung der Felder auf der Seite „Anfordern“ ist noch nicht im Spiel getestet.
+- Frühe Version: bei Problemen die Testversion nutzen und die Konsolen-Ausgabe schicken.
 
 ## Alte Datei
 

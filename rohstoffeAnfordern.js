@@ -1,7 +1,7 @@
 /*
  * Rohstoffe anfordern by Maltox – Die Stämme (Quickbar-Skript)
  * Laden: javascript:$.getScript('https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordern.js');void 0;
- * Version: 0.1 (Entwurf – NICHT genehmigt, nur zum Testen)
+ * Version: 0.2 (Entwurf – NICHT genehmigt, nur zum Testen)
  *
  * Ablauf:
  *   1. Im Hauptgebäude starten: Bedarf zusammenstellen (Gebäude, Münzen, AG, freie Menge),
@@ -166,7 +166,7 @@
 
       out.push({
         id: id,
-        name: $.trim($r.find('.quickedit-label').first().text()) || txt,
+        name: ($.trim($r.find('.quickedit-label').first().text()) || txt).replace(/\s*\(\d{1,3}\|\d{1,3}\)\s*K\d+\s*$/, ''),
         coord: x + '|' + y,
         dist: Math.hypot(x - me.x, y - me.y),
         res: res,
@@ -396,10 +396,12 @@
     // Vorher alle Anforderungsfelder leeren, damit nichts Altes mitgeschickt wird
     $('input[name^="resource["]').val('').trigger('input').trigger('change');
 
+    // 1. Felder je Lieferdorf finden
     var missing = [];
+    var targets = [];
     p.plan.forEach(function (e) {
-      var filled = false;
       var $row = $();
+      var inputs = {};
       RES.forEach(function (r, idx) {
         var $i = $('input[name="resource[' + e.id + '][' + r + ']"]');
         if (!$i.length) {
@@ -411,24 +413,55 @@
           if (!$i.length) $i = $row.find('input[type="text"], input[type="number"]').eq(idx);
         }
         if ($i.length) {
-          $i.first().val(e.res[r] > 0 ? e.res[r] : '').trigger('input').trigger('change').trigger('keyup')
-            .css('background', '#c8f7c5');
+          inputs[r] = $i.first();
           if (!$row.length) $row = $i.first().closest('tr');
-          filled = true;
         }
       });
-      if (filled) {
-        $row.find('input[type="checkbox"]').prop('checked', true).trigger('change');
-        $row.css('outline', '2px solid #2e9e2e');
-      } else {
-        missing.push(e.name + ' (' + e.coord + ')');
-      }
+      if (inputs.wood || inputs.stone || inputs.iron) targets.push({ e: e, $row: $row, inputs: inputs });
+      else missing.push(e.name + ' (' + e.coord + ')');
     });
 
-    p.filled = true;
-    save(PLAN_KEY, p);
-    showBox(p, missing, false);
-    msg('SuccessMessage', 'Werte eingetragen – bitte prüfen und selbst auf „Anfordern“ klicken.');
+    // 2. ZUERST anhaken – das Spiel füllt dabei die Felder mit seiner Vorlage (z. B. "Maximum")
+    targets.forEach(function (t) {
+      var $cb = t.$row.find('input[type="checkbox"]');
+      if ($cb.length && !$cb.prop('checked')) $cb.prop('checked', true).trigger('change');
+    });
+
+    // 3. DANACH die eigenen Werte eintragen (überschreibt die Vorlage)
+    function writeValues(withEvents) {
+      targets.forEach(function (t) {
+        RES.forEach(function (r) {
+          var $i = t.inputs[r];
+          if (!$i) return;
+          $i.val(t.e.res[r] > 0 ? t.e.res[r] : 0);
+          if (withEvents) $i.trigger('input').trigger('keyup').trigger('change');
+          $i.css('background', '#c8f7c5');
+        });
+        t.$row.css('outline', '2px solid #2e9e2e');
+      });
+    }
+    function wrongValues() {
+      var bad = [];
+      targets.forEach(function (t) {
+        RES.forEach(function (r) {
+          var $i = t.inputs[r];
+          if ($i && num($i.val()) !== (t.e.res[r] || 0)) bad.push(t.e.name);
+        });
+      });
+      return bad.filter(function (v, i, a) { return a.indexOf(v) === i; });
+    }
+
+    writeValues(true);
+    // Kontrolle: falls das Spiel nach einem Event nochmal überschreibt, Werte ohne Events erneut setzen
+    setTimeout(function () {
+      if (wrongValues().length) writeValues(false);
+      var bad = wrongValues();
+      p.filled = true;
+      save(PLAN_KEY, p);
+      showBox(p, missing.concat(bad.map(function (n) { return n + ' – Wert abweichend, bitte von Hand prüfen'; })), false);
+      if (bad.length) msg('ErrorMessage', 'Einige Werte weichen ab – bitte vor dem Anfordern prüfen.');
+      else msg('SuccessMessage', 'Werte eingetragen – bitte prüfen und selbst auf „Anfordern“ klicken.');
+    }, 400);
   }
 
   function showBox(p, missing, onlyShow) {
@@ -439,7 +472,7 @@
       '<table class="vis" style="margin-top:4px"><tr><th>Lieferdorf</th><th>Holz</th><th>Lehm</th><th>Eisen</th></tr>' +
       p.plan.map(function (e) { return '<tr><td>' + esc(e.name) + ' (' + e.coord + ')</td>' + resCells(e.res) + '</tr>'; }).join('') +
       '</table>' +
-      (missing.length ? '<p style="color:#b00000;margin:4px 0">Nicht gefunden (Gruppe/Filter der Seite prüfen): ' + missing.map(esc).join(', ') + '</p>' : '') +
+      (missing.length ? '<p style="color:#b00000;margin:4px 0">Bitte prüfen (nicht gefunden oder abweichend):' + missing.map(esc).join(', ') + '</p>' : '') +
       (onlyShow ? '' : '<p style="margin:4px 0">Prüfe die grün markierten Felder und klicke dann selbst auf <b>Anfordern</b>.</p>') +
       '</div>';
     var $target = $('#content_value').length ? $('#content_value') : $('#contentContainer');

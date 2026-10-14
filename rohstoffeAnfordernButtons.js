@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.1)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.3)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -55,17 +55,54 @@
   var coinPromise = null;
   function getCoin() {
     if (coinPromise) return coinPromise;
-    var cached = load(KEY + '_coin', null);
+    var cached = load(KEY + '_coin2', null);
     if (cached && cached.t && Date.now() - cached.t < 7 * 864e5) { coinPromise = $.Deferred().resolve(cached).promise(); return coinPromise; }
     coinPromise = $.get('/interface.php?func=get_config').then(function (xml) {
       var $x = $(xml), c = { cost: $.extend({}, COIN_FALLBACK), isCoin: true, t: Date.now() };
       RES.forEach(function (r) { var v = num($x.find('snob coin_' + r).text()); if (v > 0) c.cost[r] = v; });
       var gold = $x.find('snob gold').text();
       if (gold !== '') c.isCoin = gold === '1';
-      save(KEY + '_coin', c);
+      c.speed = parseFloat($x.find('config > speed').first().text()) || 1;
+      save(KEY + '_coin2', c);
       return c;
-    }, function () { return $.Deferred().resolve({ cost: $.extend({}, COIN_FALLBACK), isCoin: true }).promise(); });
+    }, function () { return $.Deferred().resolve({ cost: $.extend({}, COIN_FALLBACK), isCoin: true, speed: 1 }).promise(); });
     return coinPromise;
+  }
+
+  // ---------- Gebäudeinfos (Basiskosten + Faktoren) für mehrere Stufen ----------
+  var binfoPromise = null;
+  function getBuildingInfo() {
+    if (binfoPromise) return binfoPromise;
+    var cached = load(KEY + '_binfo', null);
+    if (cached && cached.t && Date.now() - cached.t < 7 * 864e5) { binfoPromise = $.Deferred().resolve(cached.b).promise(); return binfoPromise; }
+    binfoPromise = $.get('/interface.php?func=get_building_info').then(function (xml) {
+      var b = {};
+      $(xml).find('config').children().each(function () {
+        var $e = $(this), o = { max: num($e.children('max_level').text()) };
+        RES.forEach(function (r) {
+          o[r] = parseFloat($e.children(r).text()) || 0;
+          o[r + 'F'] = parseFloat($e.children(r + '_factor').text()) || 1;
+        });
+        b[this.nodeName] = o;
+      });
+      save(KEY + '_binfo', { t: Date.now(), b: b });
+      return b;
+    }, function () { return $.Deferred().resolve(null).promise(); });
+    return binfoPromise;
+  }
+  function levelCost(bi, L) {
+    var c = {};
+    RES.forEach(function (r) { c[r] = Math.round(bi[r] * Math.pow(bi[r + 'F'], L - 1)); });
+    return c;
+  }
+  // Kosten eines Gebäude-Postens von Stufe "from" bis "to" (erste Stufe = Kosten aus dem Spiel)
+  function itemCost(it, binfo) {
+    var c = $.extend({}, it.baseCost), bi = binfo && binfo[it.bid];
+    if (bi) for (var L = it.from + 1; L <= it.to; L++) {
+      var lc = levelCost(bi, L);
+      RES.forEach(function (r) { c[r] += lc[r]; });
+    }
+    return c;
   }
 
   // =====================================================================
@@ -74,23 +111,31 @@
   function buildingCost(id, $row) {
     var bm = w.BuildingMain && w.BuildingMain.buildings;
     var b = bm && bm[id];
+    var name = '', level = 0, c = null;
     if (b && b.wood != null && b.stone != null && b.iron != null) {
-      var c = { wood: num(b.wood), stone: num(b.stone), iron: num(b.iron) };
-      if (!total(c)) return null;
-      return { label: (b.name || id) + (b.level_next != null ? ' (Stufe ' + b.level_next + ')' : ''), cost: c };
+      c = { wood: num(b.wood), stone: num(b.stone), iron: num(b.iron) };
+      name = b.name || '';
+      level = num(b.level_next);
     }
-    var $all = $row.find('[data-cost]');
-    if ($all.length < 3) return null;
-    var cost = {};
-    RES.forEach(function (r, i) {
-      var $c = $row.find('.cost_' + r + '[data-cost]');
-      if (!$c.length) $c = $all.eq(i);
-      var a = $c.attr('data-cost');
-      cost[r] = a != null && a !== '' ? num(a) : num($c.text());
-    });
-    if (!total(cost)) return null;
-    var name = $.trim($row.find('td').first().find('a').filter(function () { return $.trim($(this).text()) !== ''; }).first().text()) || id;
-    return { label: name, cost: cost };
+    if (!c) {
+      var $all = $row.find('[data-cost]');
+      if ($all.length < 3) return null;
+      c = {};
+      RES.forEach(function (r, i) {
+        var $c = $row.find('.cost_' + r + '[data-cost]');
+        if (!$c.length) $c = $all.eq(i);
+        var a = $c.attr('data-cost');
+        c[r] = a != null && a !== '' ? num(a) : num($c.text());
+      });
+    }
+    if (!total(c)) return null;
+    if (!name) name = $.trim($row.find('td').first().find('a').filter(function () { return $.trim($(this).text()) !== ''; }).first().text()) || id;
+    if (!level) {
+      var mb = $row.children('td').last().prev().text().match(/Stufe\s*(\d+)/) || $row.find('a.btn, .btn-build').text().match(/Stufe\s*(\d+)/);
+      if (mb) level = num(mb[1]);
+      else { var ml = $row.children('td').first().text().match(/Stufe\s*(\d+)/); if (ml) level = num(ml[1]) + 1; }
+    }
+    return { label: name + (level ? ' Stufe ' + level : ''), name: name, bid: id, from: level, to: level, baseCost: c, cost: $.extend({}, c) };
   }
 
   // ---------- Styles (einmalig) ----------
@@ -99,10 +144,9 @@
     var st = document.createElement('style');
     st.id = 'ra_css';
     st.textContent = [
-      '.ra-mini{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;margin-left:4px;vertical-align:middle;',
-      ' border:1px solid #7d510f;border-radius:3px;background:linear-gradient(#f7e6bb,#e0c587);cursor:pointer;text-decoration:none!important}',
-      '.ra-mini:hover{background:linear-gradient(#fff3d1,#ecd29a)}',
-      '.ra-mini img{width:16px;height:16px}',
+      '#buildings .ra-col{text-align:center;white-space:nowrap;width:1%;padding:0 6px}',
+      '#buildings .ra-req{padding:3px 9px}',
+      '#buildings .ra-na{color:#9c8a62;font-size:11px;cursor:default}',
       '.ra-link{display:inline-flex;align-items:center;gap:5px;font-weight:bold;cursor:pointer}',
       '.ra-link img{width:16px;height:16px}',
       '#ra_snobbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:6px 0;padding:6px 10px;',
@@ -110,6 +154,7 @@
       '#ra_snobbar b{color:#603000}',
       '#ra_snobbar .ra-g{display:inline-flex;align-items:center;gap:5px}',
       '#ra_snobbar input{width:42px;text-align:center}',
+      '#ra_snobbar .ra-hint{color:#7a6540;font-size:11px}',
       '#ra{width:620px;max-width:92vw;font-size:12px;color:#2b1c05}',
       '#ra .ra-top{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px}',
       '#ra .ra-top h3{margin:0;font-size:15px}',
@@ -123,12 +168,13 @@
       '#ra .ra-chips{display:flex;flex-wrap:wrap;gap:5px;padding:2px 10px 8px}',
       '#ra .ra-chip{display:inline-flex;align-items:center;gap:6px;padding:1px 4px 1px 8px;border:1px solid #c1a264;border-radius:10px;background:#f4e4bc}',
       '#ra .ra-chip a{color:#8b1a00;font-weight:bold;cursor:pointer;padding:0 3px;text-decoration:none}',
+      '#ra .ra-chip input[type=number]{width:42px;padding:0 2px;text-align:center}',
       '#ra details{padding:0 10px 8px}',
       '#ra summary{cursor:pointer;color:#603000}',
       '#ra .ra-grid{display:grid;grid-template-columns:auto repeat(3,auto);gap:4px 10px;align-items:center;margin-top:6px}',
       '#ra input[type=number]{width:72px;padding:1px 3px}',
       '#ra .ra-list{max-height:260px;overflow:auto}',
-      '#ra .ra-row{display:grid;grid-template-columns:20px 1fr 190px 46px 92px;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid #ead9ab}',
+      '#ra .ra-row{display:grid;grid-template-columns:20px 1fr 190px 50px 92px;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid #ead9ab}',
       '#ra .ra-row:first-child{border-top:0}',
       '#ra .ra-row.on{background:#eef5dc}',
       '#ra .ra-row.sent{background:#e2f0d0;opacity:.75}',
@@ -151,26 +197,97 @@
     return '<img src="' + base + 'buildings/market.png" alt="" onerror="this.replaceWith(document.createTextNode(\'⇄\'))">';
   }
 
+  // Status eines Gebäudes: was fehlt im Dorf, passt es in den Speicher?
+  function buildState(cost) {
+    var cap = num(gd.village.storage_max), miss = zero(), tooBig = false;
+    RES.forEach(function (r) {
+      miss[r] = Math.max(0, cost[r] - num(gd.village[r]));
+      if (cost[r] > cap) tooBig = true;
+    });
+    return { miss: miss, tooBig: tooBig, enough: total(miss) === 0 };
+  }
+
   function injectHQ() {
     css();
-    $('#buildings tr[id^="main_buildrow_"]').each(function () {
+    var $tbl = $('#buildings');
+    if (!$tbl.length) return;
+    $tbl.find('tr').each(function () {
       var $r = $(this);
-      if ($r.find('.ra-mini').length) return;
+      if ($r.children('.ra-col').length) return;
+      var $cells = $r.children('th, td');
+      if (!$cells.length) return;
+      // Kopfzeile
+      if ($r.children('th').length && !$r.children('td').length) {
+        $r.append('<th class="ra-col">Anfordern</th>');
+        return;
+      }
+      // Volle Breite (colspan über alles) → nur verbreitern
+      if ($cells.length === 1 && num($cells.attr('colspan')) > 1) {
+        $cells.attr('colspan', num($cells.attr('colspan')) + 1);
+        return;
+      }
+      var $td = $('<td class="ra-col"></td>');
+      $r.append($td);
+      if (!/^main_buildrow_/.test(this.id || '')) return;
       var id = this.id.replace('main_buildrow_', '');
-      if (!buildingCost(id, $r)) return;
-      var $b = $('<a href="#" class="ra-mini" title="Rohstoffe für diese Stufe aus anderen Dörfern anfordern">' + marketImg() + '</a>');
+      var c = buildingCost(id, $r);
+      if (!c) return;
+      var bs = buildState(c.cost);
+      if (bs.tooBig) {
+        $td.html('<span class="ra-na" title="Der Speicher ist zu klein für diese Stufe">zu klein</span>');
+        return;
+      }
+      if (bs.enough) {
+        $td.html('<span class="ra-na" title="Genug Rohstoffe im Dorf">✓</span>');
+        return;
+      }
+      var tip = 'Fehlt: ' + RES.filter(function (r) { return bs.miss[r] > 0; }).map(function (r) { return fmt(bs.miss[r]) + ' ' + RES_DE[r]; }).join(', ');
+      var $b = $('<a href="#" class="btn ra-req" title="' + esc(tip) + '">Anfordern</a>');
       $b.on('click', function (ev) {
         ev.preventDefault();
-        var c = buildingCost(id, $r);
-        if (c) openRequest([c]);
+        var cc = buildingCost(id, $r);
+        if (cc) openRequest([cc]);
       });
-      $r.children('td').last().append($b);
+      $td.append($b);
     });
-    if (!$('#ra_bar').length && $('#buildings').length) {
+    if (!$('#ra_bar').length) {
       var $bar = $('<div id="ra_bar" style="margin:4px 0 6px;text-align:right"><a class="ra-link" id="ra_free">' + marketImg() + 'Rohstoffe anfordern</a></div>');
-      $('#buildings').before($bar);
+      $tbl.before($bar);
       $bar.on('click', '#ra_free', function (ev) { ev.preventDefault(); openRequest([]); });
     }
+  }
+
+  // Fehlende Münzen für das nächste AG aus dem Adelshof lesen (bestmöglich, Text des Spiels)
+  function detectCoins() {
+    var $c = $('#content_value').length ? $('#content_value') : $('body');
+    var lines = [];
+    $c.find('tr, li, td, th, p, div, span, b').each(function () {
+      if ($(this).closest('#ra_snobbar').length) return;
+      var t = $.trim($(this).clone().children('script').remove().end().text()).replace(/\s+/g, ' ');
+      if (t.length < 160 && /münz/i.test(t)) lines.push(t);
+    });
+    // nur eindeutige, kurze Zeilen mit genau einer Münz-Angabe – kürzeste zuerst
+    lines = lines.filter(function (v, i, a) { return a.indexOf(v) === i && (v.match(/münz/gi) || []).length === 1; })
+      .sort(function (a, b) { return a.length - b.length; });
+    dbg('Adelshof – Zeilen mit „Münz“:', lines);
+    var need = null, req = null, have = null, i, m, txt = lines.join(' | ');
+    // 1) direkter Satz: "… noch X (Gold)Münzen …" / "X weitere Münzen …"
+    m = txt.match(/(?:noch|weitere|fehl\w*|benötig\w*\s+noch)\D{0,25}?(\d[\d.]*)\s*(?:weitere\s*)?(?:gold)?münz/i) ||
+        txt.match(/(\d[\d.]*)\s*(?:weitere\s*)?(?:gold)?münz\w*\s*(?:fehl|werden noch)/i);
+    if (m) need = num(m[1]);
+    // 2) Tabelle: "benötigt/nötig … Münzen" und "vorhanden/gespeichert/gelagert … Münzen"
+    if (need == null) {
+      for (i = 0; i < lines.length; i++) {
+        var n = lines[i].match(/(\d[\d.]*)/g);
+        if (!n || n.length > 2) continue;
+        var v = num(n[n.length - 1]);
+        if (/benötig|nötig|erforderlich|nächste/i.test(lines[i]) && req == null) req = v;
+        else if (/vorhanden|gespeichert|gelagert|besitz|geprägt/i.test(lines[i]) && have == null) have = v;
+      }
+      if (req != null) need = Math.max(0, req - (have || 0));
+    }
+    dbg('Adelshof – erkannt:', { need: need, req: req, have: have });
+    return need;
   }
 
   function injectSnob() {
@@ -179,10 +296,12 @@
     getCoin().always(function (c) {
       if ($('#ra_snobbar').length) return;
       c = c || { cost: COIN_FALLBACK, isCoin: true };
-      var inp = 'type="number" min="1" value="1"';
+      var need = c.isCoin ? detectCoins() : null;
+      var coinVal = need != null && need > 0 ? need : 1;
+      var hint = need == null ? '' : (need > 0 ? '<span class="ra-hint">fehlen fürs nächste AG</span>' : '<span class="ra-hint">genug Münzen fürs nächste AG</span>');
       var html = '<div id="ra_snobbar"><b>' + marketImg() + ' Rohstoffe anfordern</b>' +
-        (c.isCoin ? '<span class="ra-g"><input id="ra_coinN" ' + inp + '> Münzen <a href="#" class="btn" data-k="coin">Anfordern</a></span>' : '') +
-        '<span class="ra-g"><input id="ra_snobN" ' + inp + '> AG <a href="#" class="btn" data-k="snob">Anfordern</a></span>' +
+        (c.isCoin ? '<span class="ra-g"><input id="ra_coinN" type="number" min="1" value="' + coinVal + '"> Münzen ' + hint + ' <a href="#" class="btn" data-k="coin">Anfordern</a></span>' : '') +
+        '<span class="ra-g"><input id="ra_snobN" type="number" min="1" value="1"> AG <a href="#" class="btn" data-k="snob">Anfordern</a></span>' +
         '<span class="ra-g"><a href="#" class="btn" data-k="free">Freie Menge</a></span></div>';
       var $t = $('#content_value').length ? $('#content_value') : $('#contentContainer');
       $t.prepend(html);
@@ -250,23 +369,41 @@
     });
   }
 
-  // "Eingehende Rohstoffe" von der Seite Marktplatz → Anfordern
-  function loadIncoming() {
+  // Seite Marktplatz → Anfordern: "Eingehende Rohstoffe" und Laufzeit je Dorf
+  function loadCallPage() {
     return $.get(gd.link_base_pure + 'market&mode=call').then(function (html) {
-      var $d = dom(html);
+      var $d = dom(html), out = { inc: null, travel: {} };
       var $head = $d.find('th, td, h3, h4').filter(function () { return /Eingehende Rohstoffe/i.test($.trim($(this).text())) && $(this).children().length === 0; }).first();
-      if (!$head.length) { dbg('Eingehende Rohstoffe: Block nicht gefunden'); return null; }
-      var $t = $head.closest('table');
-      var inc = {}, found = 0;
-      RES.forEach(function (r, i) {
-        var $c = $t.find('td').filter(function () { return $(this).find('.' + r).length > 0; }).first();
-        if (!$c.length) $c = $t.find('td').eq(i);
-        if ($c.length) found++;
-        inc[r] = num($c.text());
+      if ($head.length) {
+        var $t = $head.closest('table'), inc = {}, found = 0;
+        RES.forEach(function (r, i) {
+          var $c = $t.find('td').filter(function () { return $(this).find('.' + r).length > 0; }).first();
+          if (!$c.length) $c = $t.find('td').eq(i);
+          if ($c.length) found++;
+          inc[r] = num($c.text());
+        });
+        if (found) out.inc = inc;
+      }
+      $d.find('tr').each(function () {
+        var $c = $(this).children('td');
+        if ($c.length < 2) return;
+        var mc = $c.eq(0).text().match(/(\d{1,3})\|(\d{1,3})/), mt = $c.eq(1).text().match(/(\d+):(\d{2}):(\d{2})/);
+        if (mc && mt) out.travel[num(mc[1]) + '|' + num(mc[2])] = num(mt[1]) * 3600 + num(mt[2]) * 60 + num(mt[3]);
       });
-      dbg('Eingehende Rohstoffe:', inc);
-      return found ? inc : null;
-    }, function () { return $.Deferred().resolve(null).promise(); });
+      dbg('Anfordern-Seite:', out);
+      return out;
+    }, function () { return $.Deferred().resolve({ inc: null, travel: {} }).promise(); });
+  }
+
+  function serverNow() {
+    try { if (w.Timing && w.Timing.getCurrentServerTime) return w.Timing.getCurrentServerTime(); } catch (e) { /* egal */ }
+    return Date.now();
+  }
+  function dur(sec) { var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); if (m === 60) { h++; m = 0; } return h + ':' + (m < 10 ? '0' : '') + m + ' h'; }
+  function arrival(sec) {
+    var now = new Date(serverNow()), t = new Date(now.getTime() + sec * 1000);
+    var hm = t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return (t.getDate() !== now.getDate() ? 'morgen ' : '') + hm;
   }
 
   // =====================================================================
@@ -303,7 +440,7 @@
       }
       if (sum <= 0) return;
       RES.forEach(function (r) { rest[r] -= take[r]; });
-      plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, res: take, merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
+      plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: take, merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
     });
     return { plan: plan, rest: rest };
   }
@@ -324,11 +461,18 @@
   // =====================================================================
   function openRequest(items) {
     css();
-    var st = { items: items.slice(), incoming: zero(), incomingAuto: false, sources: [], sel: [], plan: null, locked: false, busy: false };
-    w.Dialog.show('rohAnf', '<div id="ra"><p class="ra-muted" style="padding:14px">Lade Dörfer und eingehende Rohstoffe …</p></div>');
-    $.when(loadSources(), loadIncoming()).done(function (sources, inc) {
-      st.sources = sources || [];
-      if (inc) { st.incoming = inc; st.incomingAuto = true; }
+    var st = { items: items.slice(), incoming: zero(), incomingAuto: false, sources: [], sel: [], plan: null, locked: false, busy: false, binfo: null };
+    w.Dialog.show('rohAnf', '<div id="ra"><p class="ra-muted" style="padding:14px">Lade Dörfer, Laufzeiten und eingehende Rohstoffe …</p></div>');
+    $.when(loadSources(), loadCallPage(), getBuildingInfo(), getCoin()).done(function (sources, call, binfo, conf) {
+      st.binfo = binfo;
+      var speed = (conf && conf.speed) || 1;
+      st.sources = (sources || []).map(function (s) {
+        var t = call && call.travel[s.coord];
+        s.travel = t != null ? t : Math.round(s.dist * 360 / speed);
+        s.travelEst = t == null;
+        return s;
+      }).sort(function (a, b) { return a.travel - b.travel; });
+      if (call && call.inc) { st.incoming = call.inc; st.incomingAuto = true; }
       st.sel = autoSelect(st);
       render(st);
     }).fail(function () {
@@ -377,7 +521,13 @@
     }
     $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(n.need[r]) + '</span>'; }).join(''));
     $('#ra_chips').html(st.items.length
-      ? st.items.map(function (it, i) { return '<span class="ra-chip">' + esc(it.label) + (st.locked ? '' : '<a class="ra_rm" data-i="' + i + '" title="Entfernen">×</a>') + '</span>'; }).join('')
+      ? st.items.map(function (it, i) {
+          var bi = it.bid && st.binfo && st.binfo[it.bid];
+          var lab = bi && it.from
+            ? esc(it.name) + ' Stufe ' + it.from + ' <span class="ra-muted">bis</span> <input type="number" class="ra_to" data-i="' + i + '" min="' + it.from + '" max="' + (bi.max || 99) + '" value="' + it.to + '"' + (st.locked ? ' disabled' : '') + '>'
+            : esc(it.label);
+          return '<span class="ra-chip">' + lab + (st.locked ? '' : '<a class="ra_rm" data-i="' + i + '" title="Entfernen">×</a>') + '</span>';
+        }).join('')
       : '<span class="ra-muted">Noch nichts ausgewählt – über „+ Menge“ eine Menge eintragen.</span>');
     var inp = 'type="number" min="0"' + (st.locked ? ' disabled' : '');
     $('#ra_calc').html(
@@ -410,7 +560,8 @@
       else if (on) act = '<span class="ra-muted">nicht nötig</span>';
       return '<div class="' + cls + '">' +
         '<input type="checkbox" class="ra_src" value="' + s.id + '"' + (on ? ' checked' : '') + (st.locked ? ' disabled' : '') + '>' +
-        '<div class="ra-name" title="' + esc(s.name) + '">' + esc(s.name) + ' <span class="ra-muted">' + s.dist.toFixed(1) + ' F.</span></div>' +
+        '<div class="ra-name" title="' + esc(s.name) + ' – ' + s.dist.toFixed(1) + ' Felder' + (s.travelEst ? ', Laufzeit geschätzt' : '') + '">' + esc(s.name) +
+          ' <span class="ra-muted">' + (s.travelEst ? '≈' : '') + dur(s.travel) + (on ? ' · an ' + arrival(s.travel) : '') + '</span></div>' +
         (pl ? resLine(pl.p.res, 'plan') : resLine(s.res, 'stock')) +
         '<div class="ra-mer" title="' + (pl ? 'benötigte Händler (von ' + s.merchants + ' freien)' : 'freie Händler') + '">' + (pl ? pl.p.merchants + ' H.' : s.merchants + ' frei') + '</div>' +
         '<div class="ra-act">' + act + '</div></div>';
@@ -422,7 +573,9 @@
     var $f = $('#ra_foot');
     if (!st.plan || !st.plan.plan.length) { $f.html('<span class="ra-muted">' + (st.items.length ? 'Lieferdörfer auswählen.' : '') + '</span>'); return; }
     var all = st.plan.plan.length, done = st.plan.plan.filter(function (p) { return p.sent; }).length;
-    $f.html('<span class="ra-muted">' + (st.locked ? 'Plan gesperrt – für einen neuen Plan Fenster neu öffnen. ' : 'Ein Klick = eine Anforderung. ') + done + ' von ' + all + ' angefordert</span>' +
+    var last = Math.max.apply(null, st.plan.plan.map(function (p) { return p.travel || 0; }));
+    $f.html('<span class="ra-muted">' + (st.locked ? 'Plan gesperrt – für einen neuen Plan Fenster neu öffnen. ' : 'Ein Klick = eine Anforderung. ') + done + ' von ' + all + ' angefordert' +
+      (total(st.plan.rest) <= 0 ? ' · alles da um ca. <b>' + arrival(last) + '</b>' : '') + '</span>' +
       (done < all ? '<a href="#" class="btn btn-confirm-yes" id="ra_next">Nächstes anfordern</a>' : '<span class="ra-ok">Alles angefordert ✓</span>'));
   }
 
@@ -459,6 +612,13 @@
         $('#ra_add').hide().find('input').val('');
         st.sel = autoSelect(st); update(st);
       }
+    }));
+    $d.on('change.ra', '.ra_to', guard(function () {
+      var it = st.items[num($(this).data('i'))], bi = it && st.binfo && st.binfo[it.bid];
+      if (!it || !bi) return;
+      it.to = Math.min(Math.max(num(this.value), it.from), bi.max || 99);
+      it.cost = itemCost(it, st.binfo);
+      st.sel = autoSelect(st); update(st);
     }));
     $d.on('click.ra', '.ra_rm', guard(function () { st.items.splice(num($(this).data('i')), 1); st.sel = autoSelect(st); update(st); }));
     $d.on('change.ra', '#ra_deduct', guard(function () { cfg.deductStock = this.checked; saveCfg(); st.sel = autoSelect(st); update(st); }));

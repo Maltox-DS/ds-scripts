@@ -73,17 +73,21 @@ Aufruf von Hauptgebäude oder Adelshof über jsDelivr geladen – Updates im Rep
 
 Danach gibt es dauerhaft Buttons:
 
-- **Hauptgebäude** – „Anfordern“ neben jedem Gebäude (Kosten der nächsten Stufe) und oben „Rohstoffe anfordern (freie Menge)“.
-- **Adelshof** – Leiste mit „Münze(n)“, „AG“ (Anzahl einstellbar) und „Freie Menge“.
+- **Hauptgebäude** – eigene Spalte „Anfordern“: Button nur, wenn Rohstoffe fehlen (Tooltip zeigt, was fehlt),
+  ✓ bei genug Rohstoffen, „zu klein“ wenn der Speicher die Stufe nicht fasst. Oben „Rohstoffe anfordern“ für freie Mengen.
+- **Adelshof** – Leiste mit „Münzen“, „AG“ und „Freie Menge“. Die fürs nächste AG fehlenden Münzen werden
+  aus dem Adelshof gelesen und vorausgefüllt (falls erkannt).
 
 Ein Klick öffnet das Anforderungsfenster:
 
 1. **Bedarf** – Kosten minus vorhandene Rohstoffe (abschaltbar) minus eingehende Rohstoffe
-   (werden automatisch von der Seite „Anfordern“ gelesen, von Hand änderbar). Weitere freie Mengen können ergänzt werden.
-2. **Lieferdörfer** – nach Entfernung sortiert, mit Rohstoffen und freien Händlern. „Automatisch wählen“ hakt die
-   nächsten Dörfer mit freien Händlern an, bis der Bedarf gedeckt ist; von Hand änderbar.
-3. **Verteilung** – nächste Dörfer zuerst, mit Reserve je Rohstoff und begrenzt durch die freien Händler.
-   Was nicht gedeckt werden kann, steht rot unter „Fehlt noch“.
+   (werden automatisch von der Seite „Anfordern“ gelesen, von Hand änderbar). Bei Gebäuden lässt sich
+   „bis Stufe“ erhöhen, dann werden die Kosten aller Stufen exakt aus den Spieldaten berechnet.
+2. **Lieferdörfer** – nach Laufzeit sortiert (von der Seite „Anfordern“, sonst geschätzt) mit Ankunftszeit,
+   Rohstoffen und freien Händlern. „Automatisch“ hakt die schnellsten Dörfer mit freien Händlern an,
+   bis der Bedarf gedeckt ist; von Hand änderbar.
+3. **Verteilung** – schnellste Dörfer zuerst, mit Reserve je Rohstoff und begrenzt durch die freien Händler.
+   Was nicht gedeckt werden kann, steht rot darunter. Unten steht, wann alles da ist.
 4. **Anfordern** – pro Lieferdorf ein Klick („Anfordern“ in der Zeile oder „Nächstes anfordern“).
    Nach der ersten Anforderung ist der Plan gesperrt, damit nichts doppelt angefordert wird.
 

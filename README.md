@@ -67,9 +67,9 @@ Einmal installieren: in Tampermonkey „Aus URL installieren“:
 https://raw.githubusercontent.com/Maltox-DS/ds-scripts/main/rohstoffeAnfordern.user.js
 ```
 
-Das ist nur ein kleiner Loader. Der eigentliche Code steht in `rohstoffeAnfordernButtons.js` und wird bei jedem
-Aufruf von Hauptgebäude oder Adelshof über jsDelivr geladen – Updates im Repo kommen also ohne Neuinstallation an
-(nach dem Upload jsDelivr-Cache leeren). Zum Testen eines bestimmten Stands im Loader `REF = 'main'` durch einen Commit-Hash ersetzen.
+Das ist nur ein kleiner Loader. Der eigentliche Code steht in `rohstoffeAnfordernButtons.js`. Der Loader fragt bei GitHub
+den neuesten Commit auf `main` ab (höchstens alle 5 Minuten) und lädt genau diesen Stand über jsDelivr – Updates im Repo
+kommen also ohne Neuinstallation und ohne Cache-Probleme an. Zum Testen eines bestimmten Stands im Loader `REF` auf einen Commit-Hash setzen.
 
 Danach gibt es dauerhaft Buttons:
 

@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.6)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.7)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -203,6 +203,7 @@
       '#ra .ra-res.plan{font-weight:bold}',
       '#ra .ra-mer{text-align:right;color:#5b4520}',
       '#ra .ra-act{text-align:right}',
+      '#ra .ra-why{font-size:10px;line-height:1.2;display:inline-block;max-width:92px}',
       '#ra .ra-ok{color:#2e7d1a;font-weight:bold}',
       '#ra .ra-warn{color:#a01800;padding:4px 10px 8px}',
       '#ra .ra-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 0 0}',
@@ -467,21 +468,16 @@
     var cap = num(gd.village.storage_max), need = {}, warn = [];
     var si = setInfo(st);
     if (si) {
-      // Gesamtmenge darf größer als der Speicher sein. Geliefert wird im exakten Verhältnis (Anteile eines Pakets),
-      // und jede Ankunft muss hineinpassen – inkl. Puffer für einen noch nicht geprägten Rest (1 Paket).
-      var u = si.unit, sets = 0, wave = Infinity;
+      // Gesamtmenge darf größer als der Speicher sein – die automatische Prägung arbeitet zwischen den Ankünften weg.
+      // Vorhandenes und Eingehendes wird immer mitgezählt, weil die Prägung es ohnehin verbraucht.
+      var u = si.unit, have = {}, sets = 0;
       RES.forEach(function (r) {
-        if (!u[r]) return;
-        var stock = num(gd.village[r]) + st.incoming[r];
-        var rest = Math.max(0, sum[r] - (cfg.deductStock ? num(gd.village[r]) : 0) - st.incoming[r]);
-        sets = Math.max(sets, rest / u[r]);
-        wave = Math.min(wave, (cap - stock) / u[r] - 1);
+        have[r] = num(gd.village[r]) + st.incoming[r];
+        need[r] = Math.max(0, sum[r] - have[r]);
+        if (u[r]) sets = Math.max(sets, need[r] / u[r]);
+        if (need[r] > 0 && have[r] >= cap) warn.push(RES_DE[r] + ': Speicher ist schon voll – erst prägen bzw. rekrutieren.');
       });
-      if (wave === Infinity) wave = 0;
-      wave = Math.max(0, Math.floor(wave * 100) / 100);
-      sets = Math.ceil(sets * 100) / 100;
-      if (sets > 0 && wave <= 0) warn.push('Der Speicher ist zu voll – erst prägen bzw. rekrutieren, dann anfordern.');
-      return { mode: 'sets', kind: si.kind, unit: u, sets: sets, wave: wave, sum: sum, need: ratio(u, sets), warn: warn };
+      return { mode: 'sets', kind: si.kind, unit: u, n: si.n, have: have, cap: cap, sets: Math.ceil(sets * 100) / 100, sum: sum, need: need, warn: warn };
     }
     RES.forEach(function (r) {
       var stock = num(gd.village[r]);
@@ -497,9 +493,10 @@
   }
 
   function distribute(need, sources) {
-    var rest = { wood: need.wood, stone: need.stone, iron: need.iron }, plan = [];
+    var rest = { wood: need.wood, stone: need.stone, iron: need.iron }, plan = [], why = {};
     sources.forEach(function (s) {
-      if (total(rest) <= 0) return;
+      if (total(rest) <= 0) { why[s.id] = 'nicht nötig'; return; }
+      if (s.merchants <= 0) { why[s.id] = 'keine Händler frei'; return; }
       var take = {};
       RES.forEach(function (r) { take[r] = Math.min(rest[r], Math.max(0, s.res[r] - cfg.reserve)); });
       var sum = total(take), capacity = s.merchants * cfg.merchantCap;
@@ -508,39 +505,73 @@
         RES.forEach(function (r) { take[r] = Math.floor(take[r] * f); });
         sum = total(take);
       }
-      if (sum <= 0) return;
+      if (sum <= 0) { why[s.id] = lowWhy(s, RES.filter(function (r) { return rest[r] > 0; })); return; }
       RES.forEach(function (r) { rest[r] -= take[r]; });
       plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: take, merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
     });
-    return { plan: plan, rest: rest };
+    return { plan: plan, rest: rest, why: why };
   }
 
-  // Im Paket-Verhältnis verteilen; Lieferungen, die fast gleichzeitig ankommen (< 90 s), zählen zusammen
+  function lowWhy(s, rs) {
+    var low = rs.filter(function (r) { return s.res[r] <= cfg.reserve; });
+    return low.length ? 'zu wenig ' + low.map(function (r) { return RES_DE[r]; }).join('/') + ' (Reserve)' : 'nicht nötig';
+  }
+
+  // Münzen/AGs: Ankünfte der Reihe nach durchrechnen, automatische Prägung dazwischen mitsimulieren.
+  // Kein Dorf muss selbst im Verhältnis liefern – entscheidend ist nur, dass das Zieldorf nie überläuft.
+  // Lieferungen, die fast gleichzeitig ankommen (< 90 s), zählen als eine Ankunft.
   var SAME_ARRIVAL = 90;
   function distributeSets(n, sources) {
-    var u = n.unit, uSum = total(u), rest = n.sets, plan = [];
-    sources.forEach(function (s) {
-      if (rest <= 0.005) return;
-      var f = rest;
-      RES.forEach(function (r) { if (u[r]) f = Math.min(f, Math.max(0, s.res[r] - cfg.reserve) / u[r]); });
-      f = Math.min(f, s.merchants * cfg.merchantCap / uSum);
-      var near = 0;
-      plan.forEach(function (p) { if (Math.abs((p.travel || 0) - (s.travel || 0)) < SAME_ARRIVAL) near += p.sets; });
-      f = Math.min(f, n.wave - near);
-      f = Math.floor(f * 1000) / 1000;
-      if (f <= 0.005) return;
-      var res = ratio(u, f);
-      if (total(res) <= 0) return;
-      rest -= f;
-      plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: res, sets: f, merchants: Math.ceil(total(res) / cfg.merchantCap), sent: false });
-    });
-    rest = Math.max(0, rest);
-    return { plan: plan, rest: ratio(u, rest), restSets: rest > 0.005 ? rest : 0 };
+    var u = n.unit, cap = n.cap, N = Math.ceil(n.n), S = $.extend({}, n.have), minted = 0, plan = [], why = {}, roomLimited = false;
+    function mint() {
+      var m = N - minted;
+      RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(S[r] / u[r])); });
+      if (m > 0) { RES.forEach(function (r) { S[r] -= u[r] * m; }); minted += m; }
+    }
+    mint();
+    var i = 0;
+    while (i < sources.length) {
+      var t0 = sources[i].travel || 0, group = [];
+      while (i < sources.length && (sources[i].travel || 0) - t0 < SAME_ARRIVAL) group.push(sources[i++]);
+      var add = zero();
+      group.forEach(function (s) {
+        var left = N - minted, take = {}, needR = [], fullR = [];
+        RES.forEach(function (r) {
+          var still = Math.max(0, left * u[r] - S[r] - add[r]);
+          var room = Math.max(0, cap - S[r] - add[r]);
+          if (still > 0) needR.push(r);
+          if (still > 0 && room <= 0) fullR.push(r);
+          var avail = Math.max(0, s.res[r] - cfg.reserve);
+          if (room < Math.min(still, avail)) roomLimited = true;
+          take[r] = Math.min(still, room, avail);
+        });
+        if (!needR.length) { why[s.id] = 'nicht nötig'; return; }
+        if (s.merchants <= 0) { why[s.id] = 'keine Händler frei'; return; }
+        var sum = total(take), capa = s.merchants * cfg.merchantCap;
+        if (sum > capa) {
+          var f = capa / sum;
+          RES.forEach(function (r) { take[r] = Math.floor(take[r] * f); });
+          sum = total(take);
+        }
+        if (sum <= 0) {
+          why[s.id] = fullR.length === needR.length ? 'Speicher bei Ankunft voll' : lowWhy(s, needR);
+          return;
+        }
+        RES.forEach(function (r) { add[r] += take[r]; });
+        plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: take,
+          equiv: sum / total(u), merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
+      });
+      RES.forEach(function (r) { S[r] += add[r]; });
+      mint();
+    }
+    var restSets = Math.max(0, N - minted), rest = {};
+    RES.forEach(function (r) { rest[r] = Math.max(0, restSets * u[r] - S[r]); });
+    return { plan: plan, rest: rest, restSets: restSets, why: why, roomLimited: roomLimited };
   }
 
   function ratio(u, f) { var o = {}; RES.forEach(function (r) { o[r] = Math.floor(u[r] * f); }); return o; }
   function makePlan(n, sources) { return n.mode === 'sets' ? distributeSets(n, sources) : distribute(n.need, sources); }
-  function hasNeed(n) { return n.mode === 'sets' ? n.sets > 0 && n.wave > 0 : total(n.need) > 0; }
+  function hasNeed(n) { return n.mode === 'sets' ? n.sets > 0 : total(n.need) > 0; }
 
   // Schnellste Dörfer mit freien Händlern wählen, bis der Bedarf gedeckt ist
   function autoSelect(st) {
@@ -622,9 +653,8 @@
     $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(n.need[r]) + '</span>'; }).join('') +
       (n.mode === 'sets' ? '<span class="ra-muted" style="font-size:12px;font-weight:normal;align-self:center">= ' + dez(n.sets) + ' ' + KIND[n.kind][1] + '</span>' : ''));
     $('#ra_info').html(n.mode === 'sets' && n.sets > 0
-      ? '<div class="ra-info"><b>Gleichmäßig:</b> jede Lieferung kommt im Verhältnis ' + fmt(n.unit.wood) + ' : ' + fmt(n.unit.stone) + ' : ' + fmt(n.unit.iron) +
-        '. Was ungefähr gleichzeitig ankommt, bleibt zusammen unter <b>' + fmt(ratio(n.unit, n.wave).wood) + ' / ' + fmt(ratio(n.unit, n.wave).stone) + ' / ' + fmt(ratio(n.unit, n.wave).iron) +
-        '</b> (= ' + dez(n.wave) + ' ' + KIND[n.kind][1] + ') – so läuft der Speicher beim Prägen nicht über.</div>'
+      ? '<div class="ra-info"><b>Gleichmäßig:</b> Die Lieferungen werden in der Reihenfolge ihrer Ankunft geplant, die automatische Prägung ist dazwischen eingerechnet. ' +
+        'Keine Ankunft lässt den Speicher (' + fmt(n.cap) + ') überlaufen – gleichzeitige Ankünfte (unter 90 s) zählen zusammen.</div>'
       : '');
     $('#ra_chips').html(st.items.length
       ? st.items.map(function (it, i) {
@@ -647,7 +677,10 @@
     );
     var warn = n.warn.slice();
     if (st.plan && n.mode === 'sets' && st.plan.restSets > 0) {
-      warn.push('Nicht gedeckt: Rohstoffe für ' + dez(st.plan.restSets) + ' ' + KIND[n.kind][1] + ' – weitere Dörfer anhaken oder Reserve senken. Dörfer mit gleicher Ankunftszeit teilen sich die Grenze pro Ankunft.');
+      warn.push('Nicht gedeckt: ' + st.plan.restSets + ' ' + KIND[n.kind][st.plan.restSets === 1 ? 0 : 1] + ' – es fehlen ' +
+        RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') +
+        (st.plan.roomLimited ? '. Pro Ankunft passt nicht mehr in den Speicher – den Rest später erneut anfordern oder Dörfer mit anderer Laufzeit anhaken.'
+                             : '. Weitere Dörfer anhaken oder Reserve senken.'));
     } else if (st.plan && total(st.plan.rest) > 0) {
       warn.push('Nicht gedeckt: ' + RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') + ' – weitere Dörfer anhaken oder Reserve senken.');
     }
@@ -667,14 +700,14 @@
       var cls = 'ra-row' + (on ? ' on' : '') + (pl && pl.p.sent ? ' sent' : '');
       var act = '';
       if (pl) act = pl.p.sent ? '<span class="ra-ok">✓ angefordert</span>' : '<a href="#" class="btn ra_send" data-i="' + pl.i + '">Anfordern</a>';
-      else if (on) act = '<span class="ra-muted">nicht nötig</span>';
+      else if (on) act = '<span class="ra-muted ra-why">' + esc((st.plan && st.plan.why && st.plan.why[s.id]) || 'nicht nötig') + '</span>';
       return '<div class="' + cls + '">' +
         '<input type="checkbox" class="ra_src" value="' + s.id + '"' + (on ? ' checked' : '') + (st.locked ? ' disabled' : '') + '>' +
         '<div class="ra-name" title="' + esc(s.name) + ' – ' + s.dist.toFixed(1) + ' Felder' + (s.travelEst ? ', Laufzeit geschätzt' : '') + '">' + esc(s.name) +
           ' <span class="ra-muted">' + (s.travelEst ? '≈' : '') + dur(s.travel) + (on ? ' · an ' + arrival(s.travel) : '') +
 '</span></div>' +
         (pl ? resLine(pl.p.res, 'plan') : resLine(s.res, 'stock')) +
-        '<div class="ra-mer" title="' + (pl ? 'benötigte Händler (von ' + s.merchants + ' freien)' + (pl.p.sets ? ' – reicht für ' + dez(pl.p.sets) + ' ' + KIND[st.items[0].kind][1] : '') : 'freie Händler') + '">' + (pl ? pl.p.merchants + ' H.' : s.merchants + ' frei') + '</div>' +
+        '<div class="ra-mer" title="' + (pl ? 'benötigte Händler (von ' + s.merchants + ' freien)' + (pl.p.equiv ? ' – entspricht ' + dez(pl.p.equiv) + ' ' + KIND[st.items[0].kind][1] : '') : 'freie Händler') + '">' + (pl ? pl.p.merchants + ' H.' : s.merchants + ' frei') + '</div>' +
         '<div class="ra-act">' + act + '</div></div>';
     }).join('') : '<p class="ra-muted" style="padding:8px">Keine weiteren Dörfer gefunden.</p>');
     renderFoot(st);

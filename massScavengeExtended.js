@@ -31,7 +31,7 @@ var premiumBtnEnabled = false;
     }
     var batching = false, batchGroup = null, vilMap = {}, sendList = [];
     var SETTING_KEYS = ['troopTypeEnabled', 'keepHome', 'categoryEnabled', 'prioritiseHighCat',
-                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY, 'msTimeMode', 'msDaily'];
+                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY, 'msTimeMode', 'msDaily', 'msSlots'];
 
     /* ---------- Hilfsfunktionen ---------- */
     function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -138,12 +138,48 @@ var premiumBtnEnabled = false;
         if (d.getTime() <= now.getTime() + 60000) d.setDate(d.getDate() + 1); /* schon vorbei -> morgen */
         return d;
     }
+    /* ---------- Rückkehr "mehrere Zeiten": immer bis zur nächsten Zeit aus der Liste ---------- */
+    var SLOT_DEFAULT = { times: '08:00, 12:00, 16:00, 20:00, 00:00', min: 30 };
+    function loadSlots() {
+        try { var o = JSON.parse(lsGet('msSlots')); if (o && typeof o.times === 'string') return { times: o.times, min: o.min != null ? o.min : 30 }; } catch (e) {}
+        return { times: SLOT_DEFAULT.times, min: SLOT_DEFAULT.min };
+    }
+    /* "8, 12:30 16 24" -> ['08:00','12:30','16:00','00:00'] */
+    function parseSlots(str) {
+        var out = [];
+        String(str || '').split(/[\s,;]+/).forEach(function (t) {
+            var m = /^(\d{1,2})(?:[:.](\d{2}))?$/.exec(t); if (!m) return;
+            var h = +m[1], mi = +(m[2] || 0);
+            if (h === 24 && mi === 0) h = 0;
+            if (h > 23 || mi > 59) return;
+            var v = ('0' + h).slice(-2) + ':' + ('0' + mi).slice(-2);
+            if (out.indexOf(v) < 0) out.push(v);
+        });
+        return out.sort();
+    }
+    /* nächste Zeit, die mindestens "min" Minuten entfernt ist (heute oder morgen) */
+    function nextSlot(cfg) {
+        cfg = cfg || loadSlots();
+        var list = parseSlots(cfg.times); if (!list.length) return null;
+        var now = nowMs(), lead = Math.max(0, parseInt(cfg.min, 10) || 0) * 60000, best = null;
+        [0, 1, 2].forEach(function (day) {
+            list.forEach(function (t) {
+                var d = new Date(now); d.setDate(d.getDate() + day);
+                d.setHours(+t.slice(0, 2), +t.slice(3), 0, 0);
+                if (d.getTime() - now >= Math.max(lead, 60000) && (!best || d < best)) best = d;
+            });
+        });
+        return best;
+    }
     function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
     function hm(d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
     /* Vor jeder Berechnung: im Modus "täglich" Datum/Uhrzeit im Original auf den nächsten Termin setzen */
     function applyDaily() {
-        if (lsGet('msTimeMode') !== 'daily') return;
-        var dl = loadDaily(), o = nextOccurrence(dl.off), d = nextOccurrence(dl.def);
+        var mode = lsGet('msTimeMode');
+        if (mode !== 'daily' && mode !== 'slots') return;
+        var o, d;
+        if (mode === 'slots') { o = d = nextSlot(); }
+        else { var dl = loadDaily(); o = nextOccurrence(dl.off); d = nextOccurrence(dl.def); }
         if (!o || !d) return;
         var set = function (id, v) { var e = document.getElementById(id); if (e) { e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); } };
         var r = document.getElementById('timeSelectorDate');
@@ -1085,7 +1121,7 @@ var premiumBtnEnabled = false;
             '#msNewUI .ms-stage.on{background:#e8f0d0;border-color:#6f8f3a}' +
             '#msNewUI .ms-st{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#804000;color:#fff;font-weight:bold;font-size:11px}' +
             '#msNewUI .ms-seg{display:inline-flex;border:1px solid #a4884d;border-radius:3px;overflow:hidden;margin-bottom:8px}' +
-            '#msNewUI .ms-seg span{padding:3px 10px;background:#fbf0d0;cursor:pointer}#msNewUI .ms-seg span.a{background:#804000;color:#fff}' +
+            '#msNewUI .ms-seg{flex-wrap:wrap}#msNewUI .ms-seg span{padding:3px 10px;background:#fbf0d0;cursor:pointer}#msNewUI .ms-seg span.a{background:#804000;color:#fff}' +
             '#msNewUI .ms-rt{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center}' +
             '#msNewUI .ms-hint{font-size:10px;color:#7a5a2a}' +
             '#msNewUI .ms-radio{display:flex;gap:6px}' +
@@ -1141,7 +1177,7 @@ var premiumBtnEnabled = false;
             var on = $('#category' + k).is(':checked');
             return '<label class="ms-stage' + (on ? ' on' : '') + '"><input type="checkbox" class="ms-cat" data-k="' + k + '"' + (on ? ' checked' : '') + '><span class="ms-st">' + k + '</span> ' + STAGE_NAMES[k] + '</label>';
         }).join('');
-        var tMode = lsGet('msTimeMode') === 'daily' ? 'daily' : ($('#timeSelectorDate').is(':checked') ? 'd' : 'h'), dly = loadDaily();
+        var tm0 = lsGet('msTimeMode'), tMode = (tm0 === 'daily' || tm0 === 'slots') ? tm0 : ($('#timeSelectorDate').is(':checked') ? 'd' : 'h'), dly = loadDaily(), slt = loadSlots();
         var dateMode = tMode === 'd';
         var bal = !$('#settingPriorityPriority').is(':checked');
         var p = loadProfiles();
@@ -1156,13 +1192,17 @@ var premiumBtnEnabled = false;
             '<div class="ms-col">' +
             '<div class="ms-card"><h4>Stufen</h4><div class="ms-in ms-stages">' + stages + '</div></div>' +
             '<div class="ms-card"><h4>Rückkehr</h4><div class="ms-in">' +
-            '<div class="ms-seg"><span data-m="h" class="' + (tMode === 'h' ? 'a' : '') + '">Laufzeit (Std.)</span><span data-m="d" class="' + (tMode === 'd' ? 'a' : '') + '">Datum + Uhrzeit</span><span data-m="daily" class="' + (tMode === 'daily' ? 'a' : '') + '" title="Immer zur nächsten Uhrzeit – ist sie vorbei, zählt der nächste Tag">Täglich um</span></div>' +
+            '<div class="ms-seg"><span data-m="h" class="' + (tMode === 'h' ? 'a' : '') + '" title="Laufzeit in Stunden">Laufzeit</span><span data-m="d" class="' + (tMode === 'd' ? 'a' : '') + '" title="Datum + Uhrzeit">Datum</span><span data-m="daily" class="' + (tMode === 'daily' ? 'a' : '') + '" title="Immer zur nächsten Uhrzeit – ist sie vorbei, zählt der nächste Tag">Täglich um</span><span data-m="slots" class="' + (tMode === 'slots' ? 'a' : '') + '" title="Mehrere feste Zeiten – es wird immer bis zur nächsten gerechnet">Mehrere Zeiten</span></div>' +
             '<div class="ms-rt ms-rt-h"' + (tMode === 'h' ? '' : ' style="display:none"') + '>' +
             '<b>Off-Dörfer</b><input type="text" class="ms-h-off" style="width:70px" value="' + esc($('.runTime_off').val() || '') + '"><span class="ms-hint ms-hh-off"></span>' +
             '<b>Deff-Dörfer</b><input type="text" class="ms-h-def" style="width:70px" value="' + esc($('.runTime_def').val() || '') + '"><span class="ms-hint ms-hh-def"></span></div>' +
             '<div class="ms-rt ms-rt-t"' + (tMode === 'daily' ? '' : ' style="display:none"') + '>' +
             '<b>Off-Dörfer</b><input type="time" class="ms-t-off" value="' + esc(dly.off) + '"><span class="ms-hint ms-th-off"></span>' +
             '<b>Deff-Dörfer</b><input type="time" class="ms-t-def" value="' + esc(dly.def) + '"><span class="ms-hint ms-th-def"></span></div>' +
+            '<div class="ms-rt ms-rt-s"' + (tMode === 'slots' ? '' : ' style="display:none"') + '>' +
+            '<b>Zeiten</b><input type="text" class="ms-s-times" style="width:100%;box-sizing:border-box" placeholder="z. B. 08:00, 12:00, 16:00, 20:00, 00:00" value="' + esc(slt.times) + '"><span></span>' +
+            '<b>Mindestens</b><span><input type="number" class="ms-s-min" min="0" max="600" step="5" style="width:55px" value="' + esc(String(slt.min)) + '"> Min. Laufzeit</span><span></span>' +
+            '<span></span><span class="ms-hint ms-sh" style="grid-column:2/4"></span></div>' +
             '<div class="ms-rt ms-rt-d"' + (tMode === 'd' ? '' : ' style="display:none"') + '>' +
             '<b>Off-Dörfer</b><span><input type="date" class="ms-d-offDay" value="' + esc($('#offDay').val() || '') + '"> <input type="time" class="ms-d-offTime" value="' + esc($('#offTime').val() || '') + '"></span><span></span>' +
             '<b>Deff-Dörfer</b><span><input type="date" class="ms-d-defDay" value="' + esc($('#defDay').val() || '') + '"> <input type="time" class="ms-d-defTime" value="' + esc($('#defTime').val() || '') + '"></span><span></span></div>' +
@@ -1223,14 +1263,22 @@ var premiumBtnEnabled = false;
             ['off', 'def'].forEach(function (x) { var n = nextOccurrence(ui.find('.ms-t-' + x).val()); ui.find('.ms-th-' + x).text(n ? 'nächste: ' + fmtDate(n.getTime(), true) : ''); });
         }
         th();
+        function sh() {
+            var cfg = { times: ui.find('.ms-s-times').val(), min: ui.find('.ms-s-min').val() }, n = nextSlot(cfg), l = parseSlots(cfg.times);
+            ui.find('.ms-sh').text(!l.length ? 'Keine gültige Zeit – Format z. B. 08:00, 12:00' : 'nächste Rückkehr: ' + fmtDate(n.getTime(), true) + ' · erkannt: ' + l.join(', '));
+        }
+        sh();
+        ui.find('.ms-s-times, .ms-s-min').on('input change', function () {
+            lsSet('msSlots', JSON.stringify({ times: ui.find('.ms-s-times').val(), min: parseInt(ui.find('.ms-s-min').val(), 10) || 0 })); storeActive(); sh();
+        });
         ui.find('.ms-seg span').on('click', function () {
             var m = $(this).attr('data-m'), d = m !== 'h';
             ui.find('.ms-seg span').removeClass('a'); $(this).addClass('a');
-            ui.find('.ms-rt-h').toggle(m === 'h'); ui.find('.ms-rt-d').toggle(m === 'd'); ui.find('.ms-rt-t').toggle(m === 'daily');
-            lsSet('msTimeMode', m === 'daily' ? 'daily' : ''); storeActive();
+            ui.find('.ms-rt-h').toggle(m === 'h'); ui.find('.ms-rt-d').toggle(m === 'd'); ui.find('.ms-rt-t').toggle(m === 'daily'); ui.find('.ms-rt-s').toggle(m === 'slots');
+            lsSet('msTimeMode', (m === 'daily' || m === 'slots') ? m : ''); storeActive();
             var r = document.getElementById(d ? 'timeSelectorDate' : 'timeSelectorHours');
             if (r) { r.checked = true; fire(r); fire(r, 'change'); }
-            th();
+            th(); sh();
         });
         ui.find('.ms-t-off, .ms-t-def').on('input change', function () {
             lsSet('msDaily', JSON.stringify({ off: ui.find('.ms-t-off').val(), def: ui.find('.ms-t-def').val() })); storeActive(); th();

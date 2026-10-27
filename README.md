@@ -46,6 +46,9 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
   (früheste grün, späteste rot) und Beute unterwegs je Rohstoff. Funktioniert auch auf dem Handy.
 - **Rückkehr „Täglich um“** – dritte Zeit-Option: nur Uhrzeit eingeben (z. B. 08:00); ist sie schon vorbei,
   wird automatisch der nächste Tag genommen.
+- **Rückkehr „Mehrere Zeiten“** – vierte Zeit-Option: feste Zeiten eintragen (z. B. 08:00, 12:00, 16:00, 20:00, 00:00),
+  berechnet wird immer bis zur nächsten. Liegt die nächste Zeit näher als die Mindest-Laufzeit (Standard 30 Min.),
+  wird die übernächste genommen. Gilt für Off- und Deff-Dörfer, wird pro Profil gespeichert.
 - **Danach zur vorherigen Gruppe zurück** – optionaler Schalter (Standard: aus). Ist er an, wechselt das Spiel
   nach dem Berechnen bzw. nach Übersicht/Statistik wieder auf die vorher ausgewählte Dorfgruppe
   (eine zusätzliche Seitenabfrage).

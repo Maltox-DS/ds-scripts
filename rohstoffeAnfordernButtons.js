@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.9)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.10)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -477,7 +477,6 @@
         have[r] = stock[r] + inc[r];
         need[r] = Math.max(0, sum[r] + cfg.reserve - have[r]);
         if (u[r]) sets = Math.max(sets, need[r] / u[r]);
-        if (need[r] > 0 && have[r] >= cap) warn.push(RES_DE[r] + ': Speicher ist schon voll – erst prägen bzw. rekrutieren.');
       });
       if (RES.every(function (r) { return !u[r] || cfg.reserve >= u[r]; }))
         warn.push('Die Reserve (' + fmt(cfg.reserve) + ') ist so groß wie ein ganzes Stück – die automatische Prägung würde sie mit verbrauchen. Reserve kleiner einstellen.');
@@ -558,8 +557,10 @@
         equiv: sum / total(u), merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
     });
     if (neck) return { ok: false, neck: neck, plan: plan, got: got, why: why };
-    // Zeitleiste: Unterwegs zählt für den Platz sofort, für die Prägung erst am Ende
-    var S = $.extend({}, n.stock), I = n.inc, cap = n.cap, minted = 0, i = 0, room = false;
+    // Zeitleiste: Lager + Unterwegs werden sofort mitverprägt (automatische Prägung). Geprüft wird nur noch,
+    // ob eine einzelne Ankunft nach dem Prägen des Vorherigen überhaupt in den Speicher passt.
+    var S = {}, cap = n.cap, minted = 0, i = 0, room = false;
+    RES.forEach(function (r) { S[r] = n.stock[r] + n.inc[r]; });
     function mint() {
       var m = k - minted;
       RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(Math.max(0, S[r] - cfg.reserve) / u[r])); });
@@ -569,13 +570,11 @@
     while (i < plan.length) {
       var t0 = plan[i].travel || 0, add = zero();
       while (i < plan.length && (plan[i].travel || 0) - t0 < SAME_ARRIVAL) { RES.forEach(function (r) { add[r] += plan[i].res[r]; }); i++; }
-      RES.forEach(function (r) { if (S[r] + I[r] + add[r] > cap) room = true; S[r] += add[r]; });
+      RES.forEach(function (r) { if (Math.min(S[r], cap) + add[r] > cap) room = true; S[r] += add[r]; });
       if (room) break;
       mint();
     }
     if (room) return { ok: false, room: true, plan: plan, got: got, why: why };
-    RES.forEach(function (r) { S[r] += I[r]; });
-    mint();
     return { ok: minted >= k, plan: plan, got: got, why: why };
   }
 
@@ -610,8 +609,8 @@
     var u = n.unit, N = Math.ceil(n.n), best = null, first = null;
     for (var k = N; k >= 1; k--) {
       var r = allocSets(n, sources, k);
-      if (!first) first = r;
       if (r.ok) { best = r; best.k = k; break; }
+      first = r; // zuletzt gescheitertes k = das, was gerade nicht mehr geht
     }
     if (!best) { best = { plan: [], got: zero(), why: first ? first.why : {}, k: 0 }; }
     var restSets = Math.max(0, N - best.k), rest = {};
@@ -708,8 +707,8 @@
     $('#ra_info').html(n.mode === 'sets' && n.sets > 0
       ? '<div class="ra-info"><b>Ganze ' + KIND[n.kind][1] + ':</b> Es wird nur so viel angefordert, wie zusammen mit Lager und Unterwegs genau ganze ' + KIND[n.kind][1] +
         ' ergibt – es bleibt nichts im Verhältnis übrig. Nach dem Prägen bleibt im Dorf die <b>Reserve von ' + fmt(cfg.reserve) + '</b> je Rohstoff, wie bei den Lieferdörfern. ' +
-        'Die automatische Prägung zwischen den Ankünften ist eingerechnet, der Speicher (' + fmt(n.cap) + ') läuft bei keiner Ankunft über.' +
-        '<br><b>Unterwegs zum Dorf:</b> ' + (incTot > 0 ? RES.map(function (r) { return icon(r) + fmt(n.inc[r]); }).join(' ') + ' – wird eingerechnet, egal wann es ankommt.'
+        'Lager und Unterwegs werden laufend automatisch verprägt – der Speicher (' + fmt(n.cap) + ') begrenzt deshalb nicht.' +
+        '<br><b>Unterwegs zum Dorf:</b> ' + (incTot > 0 ? RES.map(function (r) { return icon(r) + fmt(n.inc[r]); }).join(' ') + ' – wird eingerechnet.'
           : (st.incomingAuto ? 'nichts.' : '<span style="color:#a01800">nicht erkannt – falls noch etwas unterwegs ist, unter „Berechnung“ eintragen.</span>')) + '</div>'
       : '');
     $('#ra_chips').html(st.items.length
@@ -734,7 +733,7 @@
     var warn = n.warn.slice();
     if (st.plan && n.mode === 'sets' && st.plan.restSets > 0) {
       warn.push('Planbar sind ' + st.plan.k + ' von ' + st.plan.N + ' ' + KIND[n.kind][1] + '. Engpass: ' +
-        (st.plan.roomLimited ? 'Speicherplatz pro Ankunft – den Rest anfordern, wenn geprägt wurde.'
+        (st.plan.roomLimited ? 'eine einzelne Lieferung wäre größer als der Speicher – weniger auf einmal anfordern.'
          : st.plan.neck ? RES_DE[st.plan.neck] + ' bzw. Händler in den angehakten Dörfern – Dörfer mit mehr ' + RES_DE[st.plan.neck] + ' oder freien Händlern anhaken oder Reserve senken.'
          : 'Händler in den angehakten Dörfern – weitere Dörfer anhaken.'));
     } else if (st.plan && total(st.plan.rest) > 0) {

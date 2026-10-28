@@ -83,9 +83,8 @@ Danach gibt es dauerhaft Buttons:
   als in den Speicher passt (für die automatische Prägung). Angefordert werden immer nur **ganze Münzen/AGs**:
   zusammen mit Lager und Unterwegs ergibt alles genau k ganze Stück, es bleibt nichts im Verhältnis übrig.
   Nach dem Prägen behält das Zieldorf dieselbe Reserve je Rohstoff wie die Lieferdörfer (Einstellung „Reserve“).
-  Die Verteilung auf die Dörfer ist exakt (Max-Flow, schnelle Dörfer zuerst). Lieferungen, die schon unterwegs
-  sind, zählen für den Speicherplatz sofort und für die Prägung erst am Ende – so läuft der Speicher bei jeder
-  Ankunftsreihenfolge nicht über, auch wenn man nachfordert, während noch etwas unterwegs ist.
+  Die Verteilung auf die Dörfer ist exakt (Max-Flow, schnelle Dörfer zuerst). Lager und Lieferungen, die schon
+  unterwegs sind, werden eingerechnet; weil die automatische Prägung laufend verbraucht, begrenzt der Speicher hier nicht.
 
 Ein Klick öffnet das Anforderungsfenster:
 

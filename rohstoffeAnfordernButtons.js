@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.8)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.9)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -475,10 +475,12 @@
         stock[r] = num(gd.village[r]);
         inc[r] = st.incoming[r] || 0;
         have[r] = stock[r] + inc[r];
-        need[r] = Math.max(0, sum[r] - have[r]);
+        need[r] = Math.max(0, sum[r] + cfg.reserve - have[r]);
         if (u[r]) sets = Math.max(sets, need[r] / u[r]);
         if (need[r] > 0 && have[r] >= cap) warn.push(RES_DE[r] + ': Speicher ist schon voll – erst prägen bzw. rekrutieren.');
       });
+      if (RES.every(function (r) { return !u[r] || cfg.reserve >= u[r]; }))
+        warn.push('Die Reserve (' + fmt(cfg.reserve) + ') ist so groß wie ein ganzes Stück – die automatische Prägung würde sie mit verbrauchen. Reserve kleiner einstellen.');
       return { mode: 'sets', kind: si.kind, unit: u, n: si.n, have: have, stock: stock, inc: inc, cap: cap, sets: Math.ceil(sets * 100) / 100, sum: sum, need: need, warn: warn };
     }
     RES.forEach(function (r) {
@@ -531,7 +533,7 @@
   // innerhalb eines Rohstoffs die schnellsten Dörfer zuerst. Danach Zeitleiste prüfen.
   function allocSets(n, sources, k) {
     var u = n.unit, D = {}, A = zero(), capLeft = {}, take = {}, why = {};
-    RES.forEach(function (r) { D[r] = Math.max(0, k * u[r] - n.stock[r] - n.inc[r]); });
+    RES.forEach(function (r) { D[r] = Math.max(0, k * u[r] + cfg.reserve - n.stock[r] - n.inc[r]); });
     sources.forEach(function (s) {
       capLeft[s.id] = s.merchants * cfg.merchantCap; take[s.id] = zero();
       RES.forEach(function (r) { A[r] += Math.min(Math.max(0, s.res[r] - cfg.reserve), capLeft[s.id]); });
@@ -560,7 +562,7 @@
     var S = $.extend({}, n.stock), I = n.inc, cap = n.cap, minted = 0, i = 0, room = false;
     function mint() {
       var m = k - minted;
-      RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(S[r] / u[r])); });
+      RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(Math.max(0, S[r] - cfg.reserve) / u[r])); });
       if (m > 0) { RES.forEach(function (r) { S[r] -= u[r] * m; }); minted += m; }
     }
     mint();
@@ -613,7 +615,7 @@
     }
     if (!best) { best = { plan: [], got: zero(), why: first ? first.why : {}, k: 0 }; }
     var restSets = Math.max(0, N - best.k), rest = {};
-    RES.forEach(function (r) { rest[r] = Math.max(0, N * u[r] - n.have[r] - best.got[r]); });
+    RES.forEach(function (r) { rest[r] = Math.max(0, N * u[r] + cfg.reserve - n.have[r] - best.got[r]); });
     return { plan: best.plan, rest: rest, restSets: restSets, why: best.why, k: best.k, N: N,
       neck: first && first.neck, roomLimited: !!(first && first.room), got: best.got };
   }
@@ -681,7 +683,7 @@
       '<div class="ra-card"><div class="ra-head">Lieferdörfer<span><a id="ra_auto">Automatisch</a><a id="ra_none">Keine</a></span></div>' +
         '<div class="ra-list" id="ra_list"></div>' +
         '<details><summary>Einstellungen</summary><div style="margin-top:6px">' +
-          'Reserve je Rohstoff <input id="ra_reserve" ' + inp + ' value="' + cfg.reserve + '"> &nbsp; ' +
+          'Reserve je Rohstoff <span class="ra-muted">(Liefer- und Zieldorf)</span> <input id="ra_reserve" ' + inp + ' value="' + cfg.reserve + '"> &nbsp; ' +
           'Kapazität je Händler <input id="ra_mcap" ' + inp + ' value="' + cfg.merchantCap + '"></div></details>' +
       '</div>' +
 
@@ -705,7 +707,8 @@
     var incTot = n.mode === 'sets' ? total(n.inc) : 0;
     $('#ra_info').html(n.mode === 'sets' && n.sets > 0
       ? '<div class="ra-info"><b>Ganze ' + KIND[n.kind][1] + ':</b> Es wird nur so viel angefordert, wie zusammen mit Lager und Unterwegs genau ganze ' + KIND[n.kind][1] +
-        ' ergibt – es bleibt nichts im Verhältnis übrig. Die automatische Prägung zwischen den Ankünften ist eingerechnet, der Speicher (' + fmt(n.cap) + ') läuft bei keiner Ankunft über.' +
+        ' ergibt – es bleibt nichts im Verhältnis übrig. Nach dem Prägen bleibt im Dorf die <b>Reserve von ' + fmt(cfg.reserve) + '</b> je Rohstoff, wie bei den Lieferdörfern. ' +
+        'Die automatische Prägung zwischen den Ankünften ist eingerechnet, der Speicher (' + fmt(n.cap) + ') läuft bei keiner Ankunft über.' +
         '<br><b>Unterwegs zum Dorf:</b> ' + (incTot > 0 ? RES.map(function (r) { return icon(r) + fmt(n.inc[r]); }).join(' ') + ' – wird eingerechnet, egal wann es ankommt.'
           : (st.incomingAuto ? 'nichts.' : '<span style="color:#a01800">nicht erkannt – falls noch etwas unterwegs ist, unter „Berechnung“ eintragen.</span>')) + '</div>'
       : '');

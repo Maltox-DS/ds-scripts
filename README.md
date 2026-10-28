@@ -80,11 +80,12 @@ Danach gibt es dauerhaft Buttons:
   ✓ bei genug Rohstoffen, „zu klein“ wenn der Speicher die Stufe nicht fasst. Oben „Rohstoffe anfordern“ für freie Mengen.
 - **Adelshof** – Leiste mit „Münzen“, „AG“ und „Freie Menge“. Die fürs nächste AG fehlenden Münzen werden
   aus dem Adelshof gelesen und vorausgefüllt (falls erkannt). Bei Münzen und AGs darf mehr angefordert werden,
-  als in den Speicher passt (für die automatische Prägung). Angefordert werden immer nur **ganze Münzen/AGs**:
-  zusammen mit Lager und Unterwegs ergibt alles genau k ganze Stück, es bleibt nichts im Verhältnis übrig.
+  als in den Speicher passt (für die automatische Prägung). **Gleichmäßig:** Der Rohstoff, der am weitesten
+  zurückliegt, wird zuerst aufgefüllt – keiner wird über die anderen hinaus angefordert, so bleibt nichts dauerhaft
+  im Lager liegen. Reicht es nicht für ganze Stück, wird trotzdem so weit aufgefüllt, wie es geht (Teillieferung).
   Nach dem Prägen behält das Zieldorf dieselbe Reserve je Rohstoff wie die Lieferdörfer (Einstellung „Reserve“).
-  Die Verteilung auf die Dörfer ist exakt (Max-Flow, schnelle Dörfer zuerst). Lager und Lieferungen, die schon
-  unterwegs sind, werden eingerechnet; weil die automatische Prägung laufend verbraucht, begrenzt der Speicher hier nicht.
+  Die Verteilung auf die Dörfer ist exakt (Max-Flow, schnelle Dörfer zuerst). Lager und Unterwegs werden eingerechnet;
+  neue Lieferungen passen zusammen mit dem, was gerade im Dorf liegt, in den Speicher.
 
 Ein Klick öffnet das Anforderungsfenster:
 

@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.7)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.8)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -470,14 +470,16 @@
     if (si) {
       // Gesamtmenge darf größer als der Speicher sein – die automatische Prägung arbeitet zwischen den Ankünften weg.
       // Vorhandenes und Eingehendes wird immer mitgezählt, weil die Prägung es ohnehin verbraucht.
-      var u = si.unit, have = {}, sets = 0;
+      var u = si.unit, have = {}, stock = {}, inc = {}, sets = 0;
       RES.forEach(function (r) {
-        have[r] = num(gd.village[r]) + st.incoming[r];
+        stock[r] = num(gd.village[r]);
+        inc[r] = st.incoming[r] || 0;
+        have[r] = stock[r] + inc[r];
         need[r] = Math.max(0, sum[r] - have[r]);
         if (u[r]) sets = Math.max(sets, need[r] / u[r]);
         if (need[r] > 0 && have[r] >= cap) warn.push(RES_DE[r] + ': Speicher ist schon voll – erst prägen bzw. rekrutieren.');
       });
-      return { mode: 'sets', kind: si.kind, unit: u, n: si.n, have: have, cap: cap, sets: Math.ceil(sets * 100) / 100, sum: sum, need: need, warn: warn };
+      return { mode: 'sets', kind: si.kind, unit: u, n: si.n, have: have, stock: stock, inc: inc, cap: cap, sets: Math.ceil(sets * 100) / 100, sum: sum, need: need, warn: warn };
     }
     RES.forEach(function (r) {
       var stock = num(gd.village[r]);
@@ -517,56 +519,103 @@
     return low.length ? 'zu wenig ' + low.map(function (r) { return RES_DE[r]; }).join('/') + ' (Reserve)' : 'nicht nötig';
   }
 
-  // Münzen/AGs: Ankünfte der Reihe nach durchrechnen, automatische Prägung dazwischen mitsimulieren.
-  // Kein Dorf muss selbst im Verhältnis liefern – entscheidend ist nur, dass das Zieldorf nie überläuft.
+  // Münzen/AGs – zwei Regeln:
+  // 1. Ganze Münzen: es wird nur so viel angefordert, wie zusammen mit Lager und Unterwegs genau k ganze Münzen
+  //    ergibt. Reicht ein Rohstoff nicht (meist Eisen), werden die anderen nicht "auf Vorrat" geschickt.
+  // 2. Laufende Lieferungen ("unterwegs") sind in der Ankunftszeit unbekannt. Sie zählen deshalb für den Platz
+  //    im Speicher so, als wären sie schon da, für die Prägung aber erst am Ende. So läuft der Speicher bei jeder
+  //    Ankunftsreihenfolge nicht über, auch wenn man nachfordert, während noch etwas unterwegs ist.
   // Lieferungen, die fast gleichzeitig ankommen (< 90 s), zählen als eine Ankunft.
   var SAME_ARRIVAL = 90;
-  function distributeSets(n, sources) {
-    var u = n.unit, cap = n.cap, N = Math.ceil(n.n), S = $.extend({}, n.have), minted = 0, plan = [], why = {}, roomLimited = false;
+  // Für k ganze Münzen/AGs verteilen: knappster Rohstoff zuerst (er bekommt die Händler zuerst),
+  // innerhalb eines Rohstoffs die schnellsten Dörfer zuerst. Danach Zeitleiste prüfen.
+  function allocSets(n, sources, k) {
+    var u = n.unit, D = {}, A = zero(), capLeft = {}, take = {}, why = {};
+    RES.forEach(function (r) { D[r] = Math.max(0, k * u[r] - n.stock[r] - n.inc[r]); });
+    sources.forEach(function (s) {
+      capLeft[s.id] = s.merchants * cfg.merchantCap; take[s.id] = zero();
+      RES.forEach(function (r) { A[r] += Math.min(Math.max(0, s.res[r] - cfg.reserve), capLeft[s.id]); });
+    });
+    var order = RES.filter(function (r) { return D[r] > 0; });
+    var res = maxFlowAlloc(sources, D, capLeft);
+    sources.forEach(function (s, j) { RES.forEach(function (r) { take[s.id][r] = res.f[j][r]; }); });
+    var neck = null, hi = 0;
+    RES.forEach(function (r) { var q = res.miss[r] / (u[r] || 1); if (res.miss[r] > 0 && q > hi) { hi = q; neck = r; } });
+    var plan = [], got = zero();
+    sources.forEach(function (s) {
+      var t = take[s.id], sum = total(t);
+      if (sum <= 0) {
+        if (!order.length) why[s.id] = 'nicht nötig';
+        else if (s.merchants <= 0) why[s.id] = 'keine Händler frei';
+        else if (order.every(function (r) { return s.res[r] <= cfg.reserve; })) why[s.id] = lowWhy(s, order);
+        else why[s.id] = 'nicht nötig';
+        return;
+      }
+      RES.forEach(function (r) { got[r] += t[r]; });
+      plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: t,
+        equiv: sum / total(u), merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
+    });
+    if (neck) return { ok: false, neck: neck, plan: plan, got: got, why: why };
+    // Zeitleiste: Unterwegs zählt für den Platz sofort, für die Prägung erst am Ende
+    var S = $.extend({}, n.stock), I = n.inc, cap = n.cap, minted = 0, i = 0, room = false;
     function mint() {
-      var m = N - minted;
+      var m = k - minted;
       RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(S[r] / u[r])); });
       if (m > 0) { RES.forEach(function (r) { S[r] -= u[r] * m; }); minted += m; }
     }
     mint();
-    var i = 0;
-    while (i < sources.length) {
-      var t0 = sources[i].travel || 0, group = [];
-      while (i < sources.length && (sources[i].travel || 0) - t0 < SAME_ARRIVAL) group.push(sources[i++]);
-      var add = zero();
-      group.forEach(function (s) {
-        var left = N - minted, take = {}, needR = [], fullR = [];
-        RES.forEach(function (r) {
-          var still = Math.max(0, left * u[r] - S[r] - add[r]);
-          var room = Math.max(0, cap - S[r] - add[r]);
-          if (still > 0) needR.push(r);
-          if (still > 0 && room <= 0) fullR.push(r);
-          var avail = Math.max(0, s.res[r] - cfg.reserve);
-          if (room < Math.min(still, avail)) roomLimited = true;
-          take[r] = Math.min(still, room, avail);
-        });
-        if (!needR.length) { why[s.id] = 'nicht nötig'; return; }
-        if (s.merchants <= 0) { why[s.id] = 'keine Händler frei'; return; }
-        var sum = total(take), capa = s.merchants * cfg.merchantCap;
-        if (sum > capa) {
-          var f = capa / sum;
-          RES.forEach(function (r) { take[r] = Math.floor(take[r] * f); });
-          sum = total(take);
-        }
-        if (sum <= 0) {
-          why[s.id] = fullR.length === needR.length ? 'Speicher bei Ankunft voll' : lowWhy(s, needR);
-          return;
-        }
-        RES.forEach(function (r) { add[r] += take[r]; });
-        plan.push({ id: s.id, name: s.name, coord: s.coord, dist: s.dist, travel: s.travel, res: take,
-          equiv: sum / total(u), merchants: Math.ceil(sum / cfg.merchantCap), sent: false });
-      });
-      RES.forEach(function (r) { S[r] += add[r]; });
+    while (i < plan.length) {
+      var t0 = plan[i].travel || 0, add = zero();
+      while (i < plan.length && (plan[i].travel || 0) - t0 < SAME_ARRIVAL) { RES.forEach(function (r) { add[r] += plan[i].res[r]; }); i++; }
+      RES.forEach(function (r) { if (S[r] + I[r] + add[r] > cap) room = true; S[r] += add[r]; });
+      if (room) break;
       mint();
     }
-    var restSets = Math.max(0, N - minted), rest = {};
-    RES.forEach(function (r) { rest[r] = Math.max(0, restSets * u[r] - S[r]); });
-    return { plan: plan, rest: rest, restSets: restSets, why: why, roomLimited: roomLimited };
+    if (room) return { ok: false, room: true, plan: plan, got: got, why: why };
+    RES.forEach(function (r) { S[r] += I[r]; });
+    mint();
+    return { ok: minted >= k, plan: plan, got: got, why: why };
+  }
+
+  // Exakte Verteilung als Max-Flow. BFS besucht Dörfer in Laufzeit-Reihenfolge -> schnelle Dörfer zuerst.
+  function maxFlowAlloc(sources, D, capLeft) {
+    var nV = sources.length, SRC = 0, SNK = nV + 4, N = nV + 5, cap = [], adj = [];
+    for (var a = 0; a < N; a++) { cap.push(new Array(N).fill(0)); adj.push([]); }
+    function edge(x, y, c) { if (!cap[x][y] && !cap[y][x]) { adj[x].push(y); adj[y].push(x); } cap[x][y] += c; }
+    sources.forEach(function (s, j) {
+      edge(SRC, 1 + j, capLeft[s.id]);
+      RES.forEach(function (r, ri) { edge(1 + j, nV + 1 + ri, Math.max(0, s.res[r] - cfg.reserve)); });
+    });
+    RES.forEach(function (r, ri) { edge(nV + 1 + ri, SNK, D[r]); });
+    var flow = []; for (a = 0; a < N; a++) flow.push(new Array(N).fill(0));
+    for (var guard = 0; guard < 200000; guard++) {
+      var prev = new Array(N).fill(-1), q = [SRC]; prev[SRC] = SRC;
+      while (q.length && prev[SNK] < 0) {
+        var x = q.shift();
+        adj[x].forEach(function (y) { if (prev[y] < 0 && cap[x][y] - flow[x][y] > 0) { prev[y] = x; q.push(y); } });
+      }
+      if (prev[SNK] < 0) break;
+      var bott = Infinity, v;
+      for (v = SNK; v !== SRC; v = prev[v]) bott = Math.min(bott, cap[prev[v]][v] - flow[prev[v]][v]);
+      for (v = SNK; v !== SRC; v = prev[v]) { flow[prev[v]][v] += bott; flow[v][prev[v]] -= bott; }
+    }
+    var f = sources.map(function (s, j) { var o = {}; RES.forEach(function (r, ri) { o[r] = Math.max(0, flow[1 + j][nV + 1 + ri]); }); return o; });
+    var miss = {}; RES.forEach(function (r, ri) { miss[r] = D[r] - flow[nV + 1 + ri][SNK]; });
+    return { f: f, miss: miss };
+  }
+
+  function distributeSets(n, sources) {
+    var u = n.unit, N = Math.ceil(n.n), best = null, first = null;
+    for (var k = N; k >= 1; k--) {
+      var r = allocSets(n, sources, k);
+      if (!first) first = r;
+      if (r.ok) { best = r; best.k = k; break; }
+    }
+    if (!best) { best = { plan: [], got: zero(), why: first ? first.why : {}, k: 0 }; }
+    var restSets = Math.max(0, N - best.k), rest = {};
+    RES.forEach(function (r) { rest[r] = Math.max(0, N * u[r] - n.have[r] - best.got[r]); });
+    return { plan: best.plan, rest: rest, restSets: restSets, why: best.why, k: best.k, N: N,
+      neck: first && first.neck, roomLimited: !!(first && first.room), got: best.got };
   }
 
   function ratio(u, f) { var o = {}; RES.forEach(function (r) { o[r] = Math.floor(u[r] * f); }); return o; }
@@ -650,11 +699,15 @@
       st.plan = hasNeed(n) && srcs.length ? makePlan(n, srcs) : null;
     }
     st.mode = n.mode;
-    $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(n.need[r]) + '</span>'; }).join('') +
-      (n.mode === 'sets' ? '<span class="ra-muted" style="font-size:12px;font-weight:normal;align-self:center">= ' + dez(n.sets) + ' ' + KIND[n.kind][1] + '</span>' : ''));
+    var shown = n.mode === 'sets' && st.plan ? st.plan.got : n.need;
+    $('#ra_sum').html(RES.map(function (r) { return '<span>' + icon(r) + fmt(shown[r]) + '</span>'; }).join('') +
+      (n.mode === 'sets' && st.plan ? '<span class="ra-muted" style="font-size:12px;font-weight:normal;align-self:center">→ ' + st.plan.k + ' von ' + st.plan.N + ' ' + KIND[n.kind][1] + '</span>' : ''));
+    var incTot = n.mode === 'sets' ? total(n.inc) : 0;
     $('#ra_info').html(n.mode === 'sets' && n.sets > 0
-      ? '<div class="ra-info"><b>Gleichmäßig:</b> Die Lieferungen werden in der Reihenfolge ihrer Ankunft geplant, die automatische Prägung ist dazwischen eingerechnet. ' +
-        'Keine Ankunft lässt den Speicher (' + fmt(n.cap) + ') überlaufen – gleichzeitige Ankünfte (unter 90 s) zählen zusammen.</div>'
+      ? '<div class="ra-info"><b>Ganze ' + KIND[n.kind][1] + ':</b> Es wird nur so viel angefordert, wie zusammen mit Lager und Unterwegs genau ganze ' + KIND[n.kind][1] +
+        ' ergibt – es bleibt nichts im Verhältnis übrig. Die automatische Prägung zwischen den Ankünften ist eingerechnet, der Speicher (' + fmt(n.cap) + ') läuft bei keiner Ankunft über.' +
+        '<br><b>Unterwegs zum Dorf:</b> ' + (incTot > 0 ? RES.map(function (r) { return icon(r) + fmt(n.inc[r]); }).join(' ') + ' – wird eingerechnet, egal wann es ankommt.'
+          : (st.incomingAuto ? 'nichts.' : '<span style="color:#a01800">nicht erkannt – falls noch etwas unterwegs ist, unter „Berechnung“ eintragen.</span>')) + '</div>'
       : '');
     $('#ra_chips').html(st.items.length
       ? st.items.map(function (it, i) {
@@ -677,10 +730,10 @@
     );
     var warn = n.warn.slice();
     if (st.plan && n.mode === 'sets' && st.plan.restSets > 0) {
-      warn.push('Nicht gedeckt: ' + st.plan.restSets + ' ' + KIND[n.kind][st.plan.restSets === 1 ? 0 : 1] + ' – es fehlen ' +
-        RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') +
-        (st.plan.roomLimited ? '. Pro Ankunft passt nicht mehr in den Speicher – den Rest später erneut anfordern oder Dörfer mit anderer Laufzeit anhaken.'
-                             : '. Weitere Dörfer anhaken oder Reserve senken.'));
+      warn.push('Planbar sind ' + st.plan.k + ' von ' + st.plan.N + ' ' + KIND[n.kind][1] + '. Engpass: ' +
+        (st.plan.roomLimited ? 'Speicherplatz pro Ankunft – den Rest anfordern, wenn geprägt wurde.'
+         : st.plan.neck ? RES_DE[st.plan.neck] + ' bzw. Händler in den angehakten Dörfern – Dörfer mit mehr ' + RES_DE[st.plan.neck] + ' oder freien Händlern anhaken oder Reserve senken.'
+         : 'Händler in den angehakten Dörfern – weitere Dörfer anhaken.'));
     } else if (st.plan && total(st.plan.rest) > 0) {
       warn.push('Nicht gedeckt: ' + RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') + ' – weitere Dörfer anhaken oder Reserve senken.');
     }

@@ -37,6 +37,23 @@ var premiumBtnEnabled = false;
     function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
     function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
     function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    /* Eigener Dialog statt prompt()/confirm(): die Stämme-App auf dem Handy blockiert die Browser-Dialoge */
+    function msDialog(msg, opt, cb) {
+        $('#msDlg').remove();
+        var d = $('<div id="msDlg" style="position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px">' +
+            '<div style="background:#f4e4bc;border:2px solid #804000;border-radius:4px;padding:12px;max-width:340px;width:100%;box-shadow:0 6px 24px rgba(0,0,0,.45);font:13px Verdana,Arial,sans-serif;color:#000">' +
+            '<div style="font-weight:bold;margin-bottom:8px">' + esc(msg) + '</div>' +
+            (opt.input ? '<input type="text" class="ms-dlg-in" style="width:100%;box-sizing:border-box;font-size:16px;padding:4px;margin-bottom:10px" value="' + esc(opt.value || '') + '">' : '') +
+            '<div style="display:flex;gap:6px;justify-content:flex-end"><button type="button" class="btn ms-dlg-no">Abbrechen</button><button type="button" class="btn btn-confirm-yes ms-dlg-ok">' + esc(opt.ok || 'OK') + '</button></div></div></div>');
+        $('body').append(d);
+        var inp = d.find('.ms-dlg-in');
+        function close(ok) { var v = inp.length ? String(inp.val() || '').trim() : true; d.remove(); if (ok) cb(v); }
+        d.find('.ms-dlg-ok').on('click', function () { close(true); });
+        d.find('.ms-dlg-no').on('click', function () { close(false); });
+        d.on('click', function (e) { if (e.target === d[0]) close(false); });
+        d.on('keydown', function (e) { if (e.key === 'Enter') close(true); else if (e.key === 'Escape') close(false); });
+        setTimeout(function () { (inp.length ? inp : d.find('.ms-dlg-ok')).trigger('focus'); if (inp.length) inp[0].select(); }, 50);
+    }
     function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
 
     /* ---------- Profile ---------- */
@@ -324,29 +341,35 @@ var premiumBtnEnabled = false;
         $('#msOnlyCur').on('change', function () { lsSet('msOnlyCurrent', this.checked ? '1' : '0'); });
         $('#msProfileSel').on('change', function () { switchProfile($(this).val()); });
         $('#msProfileNew').on('click', function () {
-            var name = prompt('Name des neuen Profils:');
-            if (!name) return;
-            var pr = loadProfiles();
-            if (pr.list[name]) return UI.ErrorMessage('Profil existiert schon.');
-            storeActive(); pr = loadProfiles();
-            pr.list[name] = { group: pr.list[pr.active].group, settings: snapshot() };
-            pr.active = name; saveProfiles(pr); refreshBar();
+            msDialog('Name des neuen Profils:', { input: true, ok: 'Anlegen' }, function (name) {
+                if (!name) return;
+                var pr = loadProfiles();
+                if (pr.list[name]) return UI.ErrorMessage('Profil existiert schon.');
+                storeActive(); pr = loadProfiles();
+                pr.list[name] = { group: pr.list[pr.active].group, settings: snapshot() };
+                pr.active = name; saveProfiles(pr); refreshBar();
+            });
         });
         $('#msProfileRen').on('click', function () {
-            var pr = loadProfiles(), name = prompt('Neuer Name:', pr.active);
-            if (!name || name === pr.active) return;
-            if (pr.list[name]) return UI.ErrorMessage('Profil existiert schon.');
-            pr.list[name] = pr.list[pr.active]; delete pr.list[pr.active];
-            pr.active = name; saveProfiles(pr); refreshBar();
+            msDialog('Neuer Name:', { input: true, value: loadProfiles().active, ok: 'Umbenennen' }, function (name) {
+                var pr = loadProfiles();
+                if (!name || name === pr.active) return;
+                if (pr.list[name]) return UI.ErrorMessage('Profil existiert schon.');
+                pr.list[name] = pr.list[pr.active]; delete pr.list[pr.active];
+                pr.active = name; saveProfiles(pr); refreshBar();
+            });
         });
         $('#msProfileDel').on('click', function () {
             var pr = loadProfiles();
             if (Object.keys(pr.list).length < 2) return UI.ErrorMessage('Letztes Profil bleibt.');
-            if (!confirm('Profil "' + pr.active + '" löschen?')) return;
-            delete pr.list[pr.active];
-            var next = Object.keys(pr.list)[0];
-            pr.active = next; saveProfiles(pr);
-            applySettings(pr.list[next].settings); startOriginal();
+            msDialog('Profil „' + pr.active + '“ löschen?', { ok: 'Löschen' }, function () {
+                var pr = loadProfiles();
+                if (Object.keys(pr.list).length < 2) return;
+                delete pr.list[pr.active];
+                var next = Object.keys(pr.list)[0];
+                pr.active = next; saveProfiles(pr);
+                applySettings(pr.list[next].settings); startOriginal();
+            });
         });
 
         loadGroups(function (groups) {
@@ -1297,7 +1320,7 @@ var premiumBtnEnabled = false;
         /* --- Kopfzeile --- */
         ui.find('#msUiClose').on('click', function () { $('#msNewUI').remove(); $('#massScavengeSophie').remove(); });
         ui.find('#msReset').on('click', function () {
-            if (typeof window.resetSettings === 'function' && confirm('Einstellungen des Originals zurücksetzen?')) window.resetSettings();
+            if (typeof window.resetSettings === 'function') msDialog('Einstellungen des Originals zurücksetzen?', { ok: 'Zurücksetzen' }, function () { window.resetSettings(); });
         });
         /* Fenster verschiebbar */
         ui.find('.ms-h').on('mousedown', function (e) {

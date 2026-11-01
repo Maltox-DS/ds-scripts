@@ -1,5 +1,5 @@
 /*
- * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.11)
+ * Rohstoffe anfordern by Maltox – Buttons im Hauptgebäude und Adelshof (Version 1.12)
  * Wird vom Tampermonkey-Loader rohstoffeAnfordern.user.js geladen:
  *   https://cdn.jsdelivr.net/gh/Maltox-DS/ds-scripts@main/rohstoffeAnfordernButtons.js
  */
@@ -564,15 +564,69 @@
     sources.forEach(function (s) { capLeft[s.id] = s.merchants * cfg.merchantCap; });
     function level(r, x) { return (n.have[r] + (x || 0) - cfg.reserve) / u[r]; }
     function demand(T) { var D = {}; RES.forEach(function (r) { D[r] = u[r] ? Math.max(0, Math.ceil(T * u[r] + cfg.reserve - n.have[r])) : 0; }); return D; }
-    // Absicherung: neue Lieferungen müssen zusammen mit dem, was jetzt im Dorf liegt, in den Speicher passen
-    // (falls nichts geprägt werden kann, bis sie da sind). Unterwegs zählt hier nicht.
-    var head = {}; RES.forEach(function (r) { head[r] = Math.max(0, n.cap - n.stock[r]); });
-    var headLimited = false;
-    function feasible(T) {
-      var D = demand(T);
-      if (RES.some(function (r) { return D[r] > head[r]; })) return null;
-      var f = maxFlowAlloc(sources, D, capLeft);
+    // Speicher: die Lieferungen werden in ihrer echten Ankunftsreihenfolge durchgespielt, dazwischen prägt das
+    // Spiel automatisch (sobald eine ganze Münze/ein AG zusammen ist). Nur wenn dabei wirklich etwas überlaufen
+    // würde, wird weniger angefordert. Lager und Unterwegs gelten wie gehabt als sofort mitverprägt.
+    function overflows(f) {
+      var S = {}, i = 0, order = sources.map(function (s, j) { return { t: s.travel || 0, res: f.f[j] }; })
+        .filter(function (x) { return total(x.res) > 0; }).sort(function (a, b) { return a.t - b.t; });
+      RES.forEach(function (r) { S[r] = n.stock[r] + n.inc[r]; });
+      function mint() {
+        var m = Infinity;
+        RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(S[r] / u[r])); });
+        if (m > 0 && m < Infinity) RES.forEach(function (r) { S[r] -= u[r] * m; });
+      }
+      mint();
+      while (i < order.length) {
+        var t0 = order[i].t, add = zero();
+        while (i < order.length && order[i].t - t0 < SAME_ARRIVAL) { RES.forEach(function (r) { add[r] += order[i].res[r]; }); i++; }
+        for (var k = 0; k < RES.length; k++) { var r = RES[k]; if (Math.min(S[r], n.cap) + add[r] > n.cap) return true; }
+        RES.forEach(function (r) { S[r] += add[r]; });
+        mint();
+      }
+      return false;
+    }
+    function flowFor(T) {
+      var f = maxFlowAlloc(sources, demand(T), capLeft);
       return RES.every(function (r) { return f.miss[r] <= 0; }) ? f : null;
+    }
+    // Zweite Verteilung: Dörfer in Ankunftsreihenfolge, jedes hebt die gerade am weitesten zurückliegenden
+    // Rohstoffe an (ausgeglichene Mischung), damit zwischendurch geprägt werden kann. Nie mehr als in den Speicher passt.
+    function timeAlloc(T) {
+      var rem = demand(T), S = {}, f = sources.map(function () { return zero(); });
+      RES.forEach(function (r) { S[r] = n.stock[r] + n.inc[r]; });
+      function mint() {
+        var m = Infinity;
+        RES.forEach(function (r) { if (u[r]) m = Math.min(m, Math.floor(S[r] / u[r])); });
+        if (m > 0 && m < Infinity) RES.forEach(function (r) { S[r] -= u[r] * m; });
+      }
+      mint();
+      var idx = sources.map(function (s, j) { return j; }).sort(function (a, b) { return (sources[a].travel || 0) - (sources[b].travel || 0); });
+      var i = 0;
+      while (i < idx.length) {
+        var t0 = sources[idx[i]].travel || 0, pend = zero();
+        while (i < idx.length && (sources[idx[i]].travel || 0) - t0 < SAME_ARRIVAL) {
+          var j = idx[i++], s = sources[j], C = capLeft[s.id];
+          var lim = {};
+          RES.forEach(function (r) { lim[r] = u[r] ? Math.max(0, Math.min(rem[r], Math.max(0, s.res[r] - cfg.reserve), n.cap - Math.min(S[r], n.cap) - pend[r])) : 0; });
+          function amt(L, r) { return Math.min(lim[r], Math.max(0, Math.ceil(L * u[r] - S[r] - pend[r]))); }
+          function sumAt(L) { var t = 0; RES.forEach(function (r) { t += amt(L, r); }); return t; }
+          var lo2 = 0, hi2 = 1e3;
+          if (sumAt(hi2) <= C) lo2 = hi2;
+          else for (var it = 0; it < 40; it++) { var mid = (lo2 + hi2) / 2; if (sumAt(mid) <= C) lo2 = mid; else hi2 = mid; }
+          RES.forEach(function (r) { var x = amt(lo2, r); f[j][r] = x; pend[r] += x; rem[r] -= x; });
+        }
+        RES.forEach(function (r) { S[r] += pend[r]; });
+        mint();
+      }
+      return RES.every(function (r) { return rem[r] <= 0; }) ? { f: f, miss: zero() } : null;
+    }
+    function feasible(T) {
+      var f = flowFor(T);
+      if (!f) return null;
+      if (!overflows(f)) return f;
+      var g = timeAlloc(T);
+      return g && !overflows(g) ? g : null;
     }
     var lo = Infinity;
     RES.forEach(function (r) { if (u[r]) lo = Math.min(lo, level(r)); });
@@ -606,8 +660,8 @@
       rest[r] = u[r] ? Math.max(0, next * u[r] + cfg.reserve - n.have[r] - got[r]) : 0;
       if (rest[r] > 0) neck.push(r);
     });
-    var dN = demand(Math.min(N, T + 0.01));
-    headLimited = RES.some(function (r) { return dN[r] > head[r]; });
+    var fN = T < N ? flowFor(Math.min(N, T + 0.01)) : null;
+    var headLimited = !!(fN && overflows(fN) && !(function () { var g = timeAlloc(Math.min(N, T + 0.01)); return g && !overflows(g); })());
     return { plan: plan, rest: rest, restSets: restSets, why: why, k: k, N: N, T: T, neck: neck, got: got, headLimited: headLimited };
   }
 
@@ -699,7 +753,7 @@
     $('#ra_info').html(n.mode === 'sets' && n.sets > 0
       ? '<div class="ra-info"><b>Gleichmäßig:</b> Der Rohstoff, der am weitesten zurückliegt, wird zuerst aufgefüllt – keiner wird über die anderen hinaus angefordert, ' +
         'so bleibt nichts dauerhaft im Lager liegen. Nach dem Prägen bleibt im Dorf die <b>Reserve von ' + fmt(cfg.reserve) + '</b> je Rohstoff, wie bei den Lieferdörfern. ' +
-        'Lager und Unterwegs werden laufend automatisch verprägt. Neue Lieferungen passen zusammen mit dem, was jetzt im Dorf liegt, in den Speicher (' + fmt(n.cap) + ').' +
+        'Lager und Unterwegs werden laufend automatisch verprägt. Die Lieferungen sind in ihrer Ankunftsreihenfolge durchgerechnet – dazwischen wird geprägt, der Speicher (' + fmt(n.cap) + ') läuft nicht über.' +
         '<br><b>Unterwegs zum Dorf:</b> ' + (incTot > 0 ? RES.map(function (r) { return icon(r) + fmt(n.inc[r]); }).join(' ') + ' – wird eingerechnet.'
           : (st.incomingAuto ? 'nichts.' : '<span style="color:#a01800">nicht erkannt – falls noch etwas unterwegs ist, unter „Berechnung“ eintragen.</span>')) + '</div>'
       : '');
@@ -728,7 +782,7 @@
       warn.push((total(st.plan.got) > 0 && st.plan.T % 1 > 0.001 ? 'Teillieferung: ' + nk.map(function (r) { return RES_DE[r]; }).join('/') + ' wird so weit aufgefüllt, wie es geht. ' : '') +
         'Für ' + KIND[n.kind][0] + ' Nr. ' + (st.plan.k + 1) + ' fehlen danach noch ' +
         nk.map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') +
-        (st.plan.headLimited ? ' – der Speicher ist gerade zu voll; nach dem nächsten Prägen erneut anfordern.'
+        (st.plan.headLimited ? ' – mehr würde bei dieser Ankunftsreihenfolge den Speicher überlaufen lassen; nach dem nächsten Prägen erneut anfordern.'
           : ' – Dörfer mit mehr ' + nk.map(function (r) { return RES_DE[r]; }).join('/') + ' oder freien Händlern anhaken oder die Reserve senken.'));
     } else if (st.plan && total(st.plan.rest) > 0) {
       warn.push('Nicht gedeckt: ' + RES.filter(function (r) { return st.plan.rest[r] > 0; }).map(function (r) { return fmt(st.plan.rest[r]) + ' ' + RES_DE[r]; }).join(', ') + ' – weitere Dörfer anhaken oder Reserve senken.');

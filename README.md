@@ -85,7 +85,8 @@ Danach gibt es dauerhaft Buttons:
   im Lager liegen. Reicht es nicht für ganze Stück, wird trotzdem so weit aufgefüllt, wie es geht (Teillieferung).
   Nach dem Prägen behält das Zieldorf dieselbe Reserve je Rohstoff wie die Lieferdörfer (Einstellung „Reserve“).
   Die Verteilung auf die Dörfer ist exakt (Max-Flow, schnelle Dörfer zuerst). Lager und Unterwegs werden eingerechnet;
-  neue Lieferungen passen zusammen mit dem, was gerade im Dorf liegt, in den Speicher.
+  die Lieferungen werden in ihrer Ankunftsreihenfolge durchgerechnet (dazwischen prägt das Spiel automatisch) und
+  so gemischt, dass der Speicher nicht überläuft – er begrenzt deshalb praktisch nicht.
 
 Ein Klick öffnet das Anforderungsfenster:
 

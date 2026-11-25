@@ -27,6 +27,9 @@ Zum sofortigen Testen statt `@main` den Commit-Hash verwenden (z. B. `@abc1234`)
   Stufen, Rückkehr, Verteilung). Das Original läuft unsichtbar im Hintergrund und rechnet weiter;
   fehlen dessen Felder (z. B. nach einem Update von Shinko), wird automatisch das Original angezeigt.
 - **Max pro Einheit** – zusätzlich zur Reserve (Backup): höchstens so viele Truppen pro Dorf losschicken.
+- **Reserve zählt auch Truppen unterwegs** – optionaler Schalter (Standard: aus). Truppen, die gerade angreifen,
+  unterstützen oder zurückkehren, werden auf die Reserve angerechnet (Truppen auf Raubzug nicht). Dafür wird beim
+  Berechnen einmal die Truppenübersicht gelesen.
 - **Profile** – komplette Einstellungen speichern und umschalten (Neu / Umbenennen / Löschen).
 - **Dorfgruppe pro Profil** – jedes Profil rechnet nur mit den Dörfern seiner Gruppe
   (Standard ist die spielinterne Gruppe „alle“).

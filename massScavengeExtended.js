@@ -31,7 +31,7 @@ var premiumBtnEnabled = false;
     }
     var batching = false, batchGroup = null, vilMap = {}, sendList = [];
     var SETTING_KEYS = ['troopTypeEnabled', 'keepHome', 'categoryEnabled', 'prioritiseHighCat',
-                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY, 'msTimeMode', 'msDaily', 'msSlots'];
+                        'timeElement', 'sendOrder', 'runTimes', MAX_KEY, 'msTimeMode', 'msDaily', 'msSlots', 'msKeepAway'];
 
     /* ---------- Hilfsfunktionen ---------- */
     function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -74,7 +74,7 @@ var premiumBtnEnabled = false;
         return s;
     }
     function applySettings(s) {
-        SETTING_KEYS.forEach(function (k) { if (s && s[k] != null) lsSet(k, s[k]); else if (k === MAX_KEY || k === 'msTimeMode') lsDel(k); });
+        SETTING_KEYS.forEach(function (k) { if (s && s[k] != null) lsSet(k, s[k]); else if (k === MAX_KEY || k === 'msTimeMode' || k === 'msKeepAway') lsDel(k); });
     }
     function storeActive() {
         if (batching) return;
@@ -145,6 +145,64 @@ var premiumBtnEnabled = false;
         return parseInt(k[unit], 10) || 0;
     }
 
+    /* ---------- Reserve zählt auch Truppen unterwegs (Angriff, Unterstützung, Rückweg) ----------
+       Die Raubzug-Seite kennt nur die Truppen zu Hause. Ist der Schalter an, wird vor dem Berechnen einmal die
+       Truppenübersicht (nur lesen) geladen; Truppen "auswärts" und "unterwegs" werden auf die Reserve angerechnet. */
+    function keepAwayOn() { return lsGet('msKeepAway') === '1'; }
+    var awayData = null, awayStatus = null, awayCredit = {}, awayReady = false;
+    function parseAway(html) {
+        var doc = $('<div>').append($.parseHTML(String(html || '')));
+        var tbl = doc.find('#units_table');
+        if (!tbl.length) return null;
+        var units = [];
+        tbl.find('tr').first().find('img').each(function () {
+            var m = /unit_(\w+?)(?:_\w+)?\.(?:png|webp|gif)/.exec($(this).attr('src') || ''); if (m) units.push(m[1]);
+        });
+        if (!units.length) return null;
+        var res = {}, vid = null, found = 0;
+        tbl.find('tr').each(function () {
+            var tr = $(this), q = tr.find('.quickedit-vn[data-id]').first(), a;
+            if (q.length) vid = String(q.attr('data-id'));
+            else if ((a = tr.find('a[href*="village="]').first()).length && tr.find('td[rowspan]').length) { var m = /village=(\d+)/.exec(a.attr('href')); if (m) vid = m[1]; }
+            if (!vid) return;
+            var label = '';
+            tr.children('td').each(function () { var t = String($(this).text()).replace(/\s+/g, ' ').trim().toLowerCase(); if (/^(eigene|im dorf|auswärts|unterwegs|insgesamt)$/.test(t)) label = t; });
+            if (label !== 'auswärts' && label !== 'unterwegs') return;
+            found++;
+            var r = res[vid] || (res[vid] = {});
+            tr.find('td.unit-item').each(function (i) {
+                if (i >= units.length) return;
+                var n = parseInt(String($(this).text()).replace(/\D/g, ''), 10) || 0;
+                r[units[i]] = (r[units[i]] || 0) + n;
+            });
+        });
+        return found ? res : (tbl.find('td.unit-item').length ? {} : null);
+    }
+    function loadAway(cb) {
+        var base = 'game.php?';
+        if (game_data.player && game_data.player.sitter > 0) base += 't=' + game_data.player.id + '&';
+        var g = activeGroup();
+        $.get(base + 'screen=overview_villages&mode=units&type=complete&group=' + encodeURIComponent(g) + '&page=-1')
+            .done(function (html) { var r = parseAway(html); cb(r); })
+            .fail(function () { cb(null); });
+    }
+    /* Anrechnung je Dorf und Einheit: höchstens die Reserve, höchstens was unterwegs ist */
+    function creditFor(vid, unit) {
+        if (!keepAwayOn() || !awayData || !awayData[vid]) return 0;
+        return Math.max(0, Math.min(getKeep(unit), awayData[vid][unit] || 0));
+    }
+    function awayNote() {
+        if (!keepAwayOn()) return '';
+        if (awayStatus === 'fail') return '<div>⚠ Truppenübersicht konnte nicht gelesen werden – Reserve wurde normal angewendet (nur Truppen zu Hause).</div>';
+        var vs = Object.keys(awayCredit);
+        if (!vs.length) return '<div>Reserve: keine Truppen unterwegs, die angerechnet werden.</div>';
+        var parts = vs.slice(0, 6).map(function (v) {
+            var c = awayCredit[v];
+            return esc(String(villageInfo(v).name).replace(/\s*\(.*$/, '')) + ' (' + Object.keys(c).map(function (u) { return fmt(c[u]) + ' ' + (UNIT_DE[u] || u); }).join(', ') + ')';
+        });
+        return '<div>Reserve: Truppen unterwegs angerechnet in ' + vs.length + ' Dorf/Dörfern: ' + parts.join(' · ') + (vs.length > 6 ? ' …' : '') + '</div>';
+    }
+
     /* ---------- Hooks ins Original (nach jedem Laden neu setzen) ---------- */
     /* ---------- Rückkehr "täglich um": nächste Uhrzeit (heute oder morgen) ---------- */
     function loadDaily() { try { return JSON.parse(lsGet('msDaily')) || { off: '08:00', def: '08:00' }; } catch (e) { return { off: '08:00', def: '08:00' }; } }
@@ -212,10 +270,16 @@ var premiumBtnEnabled = false;
         window.calculateHaulCategories = function (data) {
             var max = loadMax();
             if (data && data.unit_counts_home) {
-                var capped = Object.assign({}, data.unit_counts_home);
-                Object.keys(max).forEach(function (unit) {
-                    var m = parseInt(max[unit], 10);
-                    if (m > 0 && capped[unit] != null) capped[unit] = Math.min(capped[unit], getKeep(unit) + m);
+                /* Das Original rechnet: erlaubt = zu Hause - Reserve (mind. 0).
+                   Max: erlaubt höchstens Max -> zu Hause auf Reserve + Max begrenzen.
+                   Truppen unterwegs (c) senken die wirksame Reserve -> zu Hause rechnerisch um c erhöhen. */
+                var capped = Object.assign({}, data.unit_counts_home), vid0 = String(data.village_id);
+                Object.keys(capped).forEach(function (unit) {
+                    var m = parseInt(max[unit], 10), keep = getKeep(unit), c = creditFor(vid0, unit), home = capped[unit];
+                    if (home == null) return;
+                    var base = m > 0 ? Math.min(home, keep - c + m) : home;
+                    capped[unit] = base + c;
+                    if (c > 0 && home > keep - c) { (awayCredit[vid0] || (awayCredit[vid0] = {}))[unit] = c; }
                 });
                 data = Object.assign({}, data, { unit_counts_home: capped });
             }
@@ -236,6 +300,21 @@ var premiumBtnEnabled = false;
         /* Nach "Laufzeiten berechnen" speichert das Original seine Einstellungen -> ins aktive Profil übernehmen */
         var origReady = window.readyToSend;
         window.readyToSend = function () {
+            /* Reserve inkl. Truppen unterwegs: zuerst die Truppenübersicht lesen, dann normal berechnen */
+            if (keepAwayOn() && !awayReady) {
+                var self = this, args = arguments;
+                if (!batching) box('Lese Truppenübersicht …');
+                loadAway(function (r) {
+                    awayData = r; awayStatus = r ? 'ok' : 'fail';
+                    if (!batching) awayCredit = {};
+                    setTimeout(function () {
+                        awayReady = true;
+                        try { window.readyToSend.apply(self, args); } finally { awayReady = false; }
+                    }, 250);
+                });
+                return;
+            }
+            if (!keepAwayOn()) { awayData = null; awayStatus = null; if (!batching) awayCredit = {}; }
             if (!batching) runInfo = {};
             applyDaily();
             /* Das Original entfernt beim Berechnen sein Einstellungsfenster (getData). Damit "Berechnen"
@@ -576,7 +655,7 @@ var premiumBtnEnabled = false;
         });
         var notes = (note ? '<div>' + note + '</div>' : '') +
             (onlyCurrent() ? '<div>📍 Nur aktuelles Dorf: ' + esc((game_data.village && game_data.village.name) || '') + '</div>' : '') +
-            runNotes(byVillage, empty);
+            runNotes(byVillage, empty) + awayNote();
         if (!order.length) return box((notes ? '<div class="ms-note">' + notes + '</div>' : '') +
             '<b>Nichts zu verschicken.</b> Reserve/Max prüfen oder alle Stufen belegt.<br><small>' + esc(dbg()) + '</small>');
         lastPreview = [groups, empty, note];
@@ -1211,7 +1290,8 @@ var premiumBtnEnabled = false;
             '<div class="ms-barslot"></div>' +
             '<div class="ms-grid"><div class="ms-card"><h4>Einheiten <small>Reihenfolge per ≡ ziehen</small></h4>' +
             '<table class="ms-u"><tr><th></th><th>Einheit</th><th style="text-align:center">nutzen</th><th style="text-align:right">Reserve</th><th style="text-align:right">Max</th></tr>' + rows + '</table>' +
-            '<div class="ms-in ms-hint">Reserve bleibt immer zu Hause · Max = höchstens so viele pro Dorf · leer = kein Limit</div></div>' +
+            '<div class="ms-in ms-hint">Reserve bleibt immer zu Hause · Max = höchstens so viele pro Dorf · leer = kein Limit</div>' +
+            '<div class="ms-in" style="padding-top:0"><label title="Truppen, die gerade angreifen, unterstützen oder zurückkehren, zählen zur Reserve. Truppen auf Raubzug zählen nicht. Lädt dafür beim Berechnen einmal die Truppenübersicht."><input type="checkbox" id="msKeepAway"' + (keepAwayOn() ? ' checked' : '') + '> Reserve zählt auch Truppen unterwegs</label></div></div>' +
             '<div class="ms-col">' +
             '<div class="ms-card"><h4>Stufen</h4><div class="ms-in ms-stages">' + stages + '</div></div>' +
             '<div class="ms-card"><h4>Rückkehr</h4><div class="ms-in">' +
@@ -1275,6 +1355,7 @@ var premiumBtnEnabled = false;
         ui.find('.ms-up').on('click', function () { var r = $(this).closest('tr'), p = r.prev('tr[data-u]'); if (p.length) { p.before(r); applyOrder(); } });
         ui.find('.ms-dn').on('click', function () { var r = $(this).closest('tr'), n = r.next('tr[data-u]'); if (n.length) { n.after(r); applyOrder(); } });
         /* --- Stufen --- */
+        ui.find('#msKeepAway').on('change', function () { lsSet('msKeepAway', this.checked ? '1' : '0'); storeActive(); });
         ui.find('.ms-cat').on('change', function () {
             $('#category' + $(this).attr('data-k')).prop('checked', this.checked);
             $(this).closest('.ms-stage').toggleClass('on', this.checked);
